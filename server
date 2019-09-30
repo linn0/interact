@@ -1,0 +1,10 @@
+#!/bin/sh
+
+SRVHOME=/home/postgres/dbapp/interact
+
+while true
+do
+    lx86cl64 --load "$SRVHOME/datapump/main.lisp" > $SRVHOME/run.log 2>&1
+    sleep 60
+done
+
