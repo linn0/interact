@@ -56,9 +56,9 @@
     (pgsql:execute (:create-index 'movie_item_imgsig_idx :on movie-item-aux :using :gist :fields signature))
 
     (dolist (site-args (list 
-        '(:id 1 :url "http://www.aqdyb.com/" :name "爱情电影网-撸丝片" :url-path "/lusi/index~D.html")
+        '(:id 1 :url "http://www.aqdyb.com/" :name "爱情电影网-动漫片" :url-path "/lldm/index~D.html")
         '(:id 2 :url "http://www.aqdyb.com/" :name "爱情电影网-伦理片" :url-path "/lunli/index~D.html")
-        '(:id 3 :url "http://www.aqdyb.com/" :name "爱情电影网-社保片" :url-path "/shebao/index~D.html")
-        '(:id 4 :url "http://www.aqdyb.com/" :name "爱情电影网-动漫片" :url-path "/lldm/index~D.html")))
+        '(:id 3 :url "http://www.aqdyb.com/" :name "爱情电影网-撸丝片" :url-path "/lusi/index~D.html")
+        '(:id 4 :url "http://www.aqdyb.com/" :name "爱情电影网-社保片" :url-path "/shebao/index~D.html")))
       (pgsql:upsert-dao (apply #'make-instance 'site 
         (nconc site-args '(:real-url :null :detail :null :access-time :null)))))))
