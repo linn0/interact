@@ -20,7 +20,7 @@
                  (:file "http-client")
                  (:file "http-utils")
                  (:file "task-list")
-                 (:file "item-list")
+                 (:file "searcher")
                  (:file "player")
                  (:file "http-server"))))
   :depends-on (:cl-postgres :s-sql :postmodern

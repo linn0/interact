@@ -8,7 +8,7 @@
 ;;; ----------------------------------------------------
 
 (http:define-http-router http-url-router
-  (:get "/items" 'items)
+  (:get "/search" 'search-keywords)
   (:get "/player" 'player)
   (:post "/task-list" 'task-list))
 
