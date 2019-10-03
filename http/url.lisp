@@ -242,9 +242,17 @@
 
 ;;; ----------------------------------------------------
 
-(defun escape-char-p (c)
+(defun escape-char-p (code)
   "T if a character needs to be escaped in a URL."
-  (not (or (alphanumericp c) (find c "-._~"))))
+  (not
+    (or
+      (and (>= code (char-code #\0)) (<= code (char-code #\9)))
+      (and (>= code (char-code #\a)) (<= code (char-code #\z)))
+      (and (>= code (char-code #\A)) (<= code (char-code #\Z)))
+      (= code (char-code #\-))
+      (= code (char-code #\.))
+      (= code (char-code #\_))
+      (= code (char-code #\~)))))
 
 ;;; ----------------------------------------------------
 
@@ -270,46 +278,55 @@
 (defun url-encode (string)
   "Convert a string into a URL-safe, encoded string."
   (with-output-to-string (url)
-    (flet ((encode-char (c)
-             (if (escape-char-p c)
-                 (format url "%~16,2,'0r" (char-code c))
-               (princ c url))))
-      (map nil #'encode-char string))))
+    (flet ((encode-char (code)
+             (let ((c (code-char code)))
+               (if (escape-char-p code)
+                   (format url "%~16,2,'0r" code)
+                 (princ c url)))))
+      (map nil #'encode-char
+        (ccl:encode-string-to-octets string
+          :external-format :utf-8)))))
 
 ;;; ----------------------------------------------------
 
 (defun url-decode (url)
   "Decode an encoded URL into a string."
-  (with-output-to-string (s)
-    (with-input-from-string (i url)
-      (do ((c (read-char i nil nil)
-              (read-char i nil nil)))
-          ((null c))
-        (case c
-          (#\+ (princ #\space s))
+  (ccl:decode-string-from-octets 
+    (ccl:with-output-to-vector (s)
+      (with-input-from-string (i url)
+        (do ((c (read-char i nil nil)
+                (read-char i nil nil)))
+            ((null c))
+          (case c
+            (#\+ (write-byte (char-code #\space) s))
 
-          ;; 2-digit escaped ascii code
-          (#\% (let ((c1 (read-char i nil nil))
-                     (c2 (read-char i nil nil)))
-                 (when (and c1 c2)
-                   (let ((n1 (parse-integer (string c1) :radix 16))
-                         (n2 (parse-integer (string c2) :radix 16)))
-                     (princ (code-char (logior (ash n1 4) n2)) s)))))
+            ;; 2-digit escaped ascii code
+            (#\% (let ((c1 (read-char i nil nil))
+                       (c2 (read-char i nil nil)))
+                   (when (and c1 c2)
+                     (let ((n1 (parse-integer (string c1) :radix 16))
+                           (n2 (parse-integer (string c2) :radix 16)))
+                       (write-byte (logior (ash n1 4) n2) s)))))
 
-          ;; just a normal character
-          (otherwise (write-char c s)))))))
+            ;; just a normal character
+            (otherwise (write-byte (char-code c) s))))))
+    :external-format :utf-8))
 
 ;;; ----------------------------------------------------
 
 (defun url-format (stream &optional form colonp atp &rest args)
   "URL encode a form into a stream."
   (declare (ignore colonp atp args))
-  (flet ((encode-char (c)
-           (if (escape-char-p c)
-               (format stream "%~16,2,'0r" (char-code c))
-             (princ c stream))))
+  (flet ((encode-char (code)
+           (let ((c (code-char code)))
+             (if (escape-char-p code)
+                 (format stream "%~16,2,'0r" code)
+               (princ c stream)))))
     (when form
-      (map nil #'encode-char (princ-to-string form)))))
+      (map nil #'encode-char
+        (ccl:encode-string-to-octets
+          (princ-to-string form)
+          :external-format :utf-8)))))
 
 ;;; ----------------------------------------------------
 

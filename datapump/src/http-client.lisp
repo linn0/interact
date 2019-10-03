@@ -108,7 +108,6 @@
 (defun http-parse-image (item-id)
   (let* ((movie (pgsql:get-dao 'movie-item item-id))
          (file-path (ext:concat +http-images-folder+ (movie-item-image movie)))
-         (img-path (ext:concat "log/images/" (movie-item-image movie)))
          (tmp-file (ext:concat file-path ".tmp")))
     (unless (probe-file file-path)
       (ext:attach (http:http-async-get 
@@ -123,19 +122,24 @@
                                    :if-exists :supersede)
               (write-sequence input ofile))
             (rename-file tmp-file file-path)))))
-    (pgsql:with-connection +db-conn-info+
-      (pgsql:query 
-        (:insert-into 'movie-item-aux
-          (:select 
-            (movie-item-id movie) 
-            (:as (:to_tsvector "chinese" (movie-item-title movie)) 'title)
-            (:as (:shuffle_pattern 'pattern) 'pattern)
-            (:as (:pattern2signature 'pattern) 'signature)
-            :from 
-            (:as 
-              (:select 
-                (:as 
-                  (:jpeg2pattern 
-                    (:pg_read_binary_file img-path)) 
-                  'pattern)) 
-              'x)))))))
+    (make-task 'http-post-process
+      (list (movie-item-id movie)) "post-process-item")))
+
+(defun http-post-process (item-id)
+  (let* ((movie (pgsql:get-dao 'movie-item item-id))
+         (img-path (ext:concat "log/images/" (movie-item-image movie))))
+    (pgsql:query
+      (:insert-into 'movie-item-aux
+        (:select
+          (movie-item-id movie)
+          (:as (:to_tsvector "chinese" (movie-item-title movie)) 'title)
+          (:as (:shuffle_pattern 'pattern) 'pattern)
+          (:as (:pattern2signature 'pattern) 'signature)
+          :from
+          (:as
+            (:select
+              (:as
+                (:jpeg2pattern
+                  (:pg_read_binary_file img-path))
+                'pattern))
+            'x))))))
