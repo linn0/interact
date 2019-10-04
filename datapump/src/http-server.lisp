@@ -8,9 +8,9 @@
 ;;; ----------------------------------------------------
 
 (http:define-http-router http-url-router
-  (:get "/search" 'search-keywords)
-  (:get "/player" 'player)
-  (:post "/task-list" 'task-list))
+  (:get "/search"  'search-query)
+  (:get "/player"  'player)
+  (:get "/taskmgr" 'task-manage))
 
 ;;; ----------------------------------------------------
 

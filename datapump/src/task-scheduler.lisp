@@ -28,7 +28,7 @@
   (pgsql:with-connection +db-conn-info+
     (pgsql:execute (:create-sequence 'task_id_seq))
     (pgsql:execute (pgsql:dao-table-definition 'task))
-    (pgsql:query 
+    (pgsql:query
       (:update 'task :set 'state "pending"
                :where (:= 'state "running"))))
 
@@ -39,11 +39,11 @@
 
 (defmacro function-to-string (func)
   `(concatenate 'string
-                (package-name (symbol-package ,func)) 
+                (package-name (symbol-package ,func))
                 "::"
                 (symbol-name ,func)))
 
-(defun function-as-string (func-str)
+(defun string-to-function (func-str)
   (let ((fence (search "::" func-str :from-end t)))
     (find-symbol (subseq func-str (+ fence 2)) (subseq func-str 0 fence))))
 
@@ -66,18 +66,20 @@
                             (:= 'state "pending"))
                           'start-time)
                         10))
-                    (pgsql:query-dao 'task 
-                      (:limit 
-                        (:order-by 
-                          (:select '* :from 'task :where 
-                            (:and 
+                    (pgsql:query-dao 'task
+                      (:limit
+                        (:order-by
+                          (:select '* :from 'task :where
+                            (:and
                               (:= 'state "failed")
                               (:< 'failures 5)
-                              (:< 'end-time (:- (:now) (simple-date:encode-interval :minute 3)))))
-                          'start-time) 
+                              (:< 'end-time
+                                (:- (:now)
+                                  (simple-date:encode-interval :minute 3)))))
+                          'start-time)
                         10))))
-      (if (< (pgsql:query (:select (:count 'id) :from 'task :where 
-                              (:and 
+      (if (< (pgsql:query (:select (:count 'id) :from 'task :where
+                              (:and
                                 (:= 'state "running")
                                 (:= 'group-id (task-group-id task))))
                             :single) 10)
@@ -86,26 +88,27 @@
 (defun run-task (task)
   (setf (task-state task) "running")
   (pgsql:update-dao task)
-  (ext:chain 
-    (apply 
-      (function-as-string (task-function task))
+  (ext:chain
+    (apply
+      (string-to-function (task-function task))
       (read-from-string (task-arguments task)))
     (:then (result)
       (log:info "task ~d completed, result: ~s~%" (task-id task) result)
       (pgsql:with-connection +db-conn-info+
-        (pgsql:query 
-          (:update 'task 
-                   :set 'state "completed" 
-                        'end-time (:now) 
+        (pgsql:query
+          (:update 'task
+                   :set 'state "completed"
+                        'end-time (:now)
                         'result (format nil "~s" result)
                    :where (:= 'id (task-id task))))))
     (:catch (condition)
       (log:error "task ~d failed, condition: ~s~%" (task-id task) condition)
       (let ((stack-trace (ext:thread-stack-trace :start-frame-number 5)))
         (pgsql:with-connection +db-conn-info+
-          (pgsql:query 
-            (:update 'task 
-                     :set 'state "failed" 'end-time (:now) 
-                          'cause (format nil "~a~%signal-error: ~a, stack trace:~%~a" (task-cause task) condition stack-trace)
+          (pgsql:query
+            (:update 'task
+                     :set 'state "failed" 'end-time (:now)
+                          'cause (format nil "~a~%signal-error: ~a, stack trace:~%~a"
+                                   (task-cause task) condition stack-trace)
                           'failures (1+ (task-failures task))
                      :where (:= 'id (task-id task)))))))))

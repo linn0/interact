@@ -42,7 +42,7 @@
 (defun show-items (type query n items)
   (html-render 
     (<html>
-      (<head> (<title> "Images List")
+      (<head> (<title> "更好看的内容，互动一下就知道！")
         (<link> :href "https://cdn.bootcss.com/bulma/0.7.5/css/bulma.min.css"
                 :rel "stylesheet"))
       (<body>
@@ -50,9 +50,9 @@
           (<form> :action "/search" :method "GET" :class "field has-addons"
             (<div> :class "control select"
               (<select> :name "type"
-                (<option> :value "keyword" "keyword")
-                (<option> :value "actor" "actor")
-                (<option> :value "image" "image")))
+                (<option> :value "keyword" "关键词")
+                (<option> :value "actor" "演员")
+                (<option> :value "image" "图片")))
             (<div> :class "control"
               (<input> :class "input" :type "text" :name "query"
                        :style "width: 30rem" :placeholder "输入搜索词"))
@@ -127,7 +127,7 @@
     ("image"   query-image-similar-items)
     ("main"    query-items-main)))
 
-(defun search-keywords (session resp)
+(defun search-query (session resp)
   "Generate the page."
   (declare (ignore session))
   (let* ((params (url:url-query (http:req-url (http:resp-request resp))))

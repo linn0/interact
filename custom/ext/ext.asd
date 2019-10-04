@@ -1,6 +1,6 @@
 ;;;; ext.asd
 ;;;;  
-;;;; Copyright 2017 Xiaolingfeng <vvk7@qq.com>
+;;;; Copyright 2017 linn0 <petagres@outlook.com>
 ;;;;
 ;;;; This software is released under the GPL License.
 ;;;; https://opensource.org/licenses/gpl-license
@@ -9,7 +9,7 @@
   (pushnew :thread-support *features*))
 
 (defsystem ext
-  :author "Xiaolingfeng <vvk7@qq.com>"
+  :author "linn0 <petagres@outlook.com>"
   :license "GPL"
   :description "Extended Common Lisp Programming Language Syntax."
   :components ((:module "src"

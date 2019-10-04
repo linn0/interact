@@ -127,7 +127,8 @@
 
 (defun http-post-process (item-id)
   (let* ((movie (pgsql:get-dao 'movie-item item-id))
-         (img-path (ext:concat "log/images/" (movie-item-image movie))))
+         (img-path (ext:concat "log/images/" (movie-item-image movie)))
+         (suffix (subseq img-path (1+ (position #\. img-path :from-end t)))))
     (pgsql:query
       (:insert-into 'movie-item-aux
         (:select
@@ -139,7 +140,9 @@
           (:as
             (:select
               (:as
-                (:jpeg2pattern
-                  (:pg_read_binary_file img-path))
+                (case suffix
+                  ("png" (:png2pattern (:pg_read_binary_file img-path)))
+                  ("gif" (:gif2pattern (:pg_read_binary_file img-path)))
+                  (("jpg" "jpeg") (:jpeg2pattern (:pg_read_binary_file img-path))))
                 'pattern))
             'x))))))
