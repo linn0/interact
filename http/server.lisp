@@ -23,8 +23,8 @@
 
 (defclass server-config ()
   ((process-name    :initarg :name            :initform "HTTP")
-   (host            :initarg :host            :initform "192.168.1.83")
-   (port            :initarg :port            :initform 8080)
+   (host            :initarg :host            :initform "0.0.0.0")
+   (port            :initarg :port            :initform 80)
    (public-folder   :initarg :public-folder   :initform nil)
    (home-page       :initarg :home-page       :initform nil)
    (session-class   :initarg :session-class   :initform 'http-session)
@@ -182,7 +182,7 @@
 
               ;; is the request path in the public folder
               (let ((path (http-public-file-p config resp)))
-                (if path 
+                (if path
                   (http-file-response path resp)
 
                   (if not-found
@@ -226,7 +226,7 @@
       (setf (http-header resp "Content-Encoding") "gzip"))
     (content-type-push content-type resp)
     ;; build the page and return it
-    (http-ok resp 
+    (http-ok resp
       (if (content-type-text-p content-type)
         (slurp-file-string path)
         (slurp-file-octet-vector path)))))

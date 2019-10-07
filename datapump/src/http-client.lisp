@@ -49,7 +49,7 @@
                (group-id (http-url-group real-url))
                (url-pattern (url:url-resolve real-url (site-url-path site))))
           (pgsql:with-connection +db-conn-info+
-            (pgsql:query 
+            (pgsql:query
               (:update 'site
                        :set 'real-url real-url
                             'access-time (:now)
@@ -71,7 +71,7 @@
               (unless (pgsql:query
                         (:select 'id :from 'movie-item :where (:= 'url url-path))
                         :single)
-                (make-task 'html-parse-item (list site-id item-url) 
+                (make-task 'html-parse-item (list site-id item-url)
                   (http-url-group item-url))))))))))
 
 (defun html-parse-item (site-id item-url)
@@ -81,12 +81,12 @@
              (doc (plump:parse input))
              (url-path (url:url-path (url:url-parse item-url))))
         (log:debug "item url: ~A, response size: ~D" item-url (length input))
-        (let ((image-url (url-resolve item-url 
+        (let ((image-url (url-resolve item-url
                            (plump:attribute (select-first "div.detail-pic > img" doc) "src")))
               (title (plump:text (select-first "div.detail-title > h2" doc)))
               (actors (map 'vector #'plump:text (clss:select "div.info > dl > dd > a" doc)))
-              (play-list (ext:join 
-                           (map 'list (lambda (elem) (plump:attribute elem "href")) 
+              (play-list (ext:join
+                           (map 'list (lambda (elem) (plump:attribute elem "href"))
                              (clss:select "p.play-list a" doc))
                            :separator ","))
               (detail (plump:text (select-first "div#detail-intro div.detail-desc-cnt" doc)))
@@ -95,14 +95,14 @@
           (let* ((relative-path (ext:join (list site-id
                                   (subseq image-url (1+ (position #\/ image-url :from-end t))))
                                   :separator "/"))
-                 (movie (make-instance 'movie-item :site-id site-id 
-                                       :title title :actor actors :detail detail 
-                                       :url url-path :image-url image-url :play-url play-list 
+                 (movie (make-instance 'movie-item :site-id site-id
+                                       :title title :actor actors :detail detail
+                                       :url url-path :image-url image-url :play-url play-list
                                        :image relative-path :addtime addtime :rating rating)))
             (pgsql:with-connection +db-conn-info+
               (pgsql:save-dao movie)
-              (make-task 'http-parse-image 
-                (list (movie-item-id movie)) 
+              (make-task 'http-parse-image
+                (list (movie-item-id movie))
                 (http-url-group (movie-image-url movie))))))))))
 
 (defun http-parse-image (item-id)
@@ -110,7 +110,7 @@
          (file-path (ext:concat +http-images-folder+ (movie-item-image movie)))
          (tmp-file (ext:concat file-path ".tmp")))
     (unless (probe-file file-path)
-      (ext:attach (http:http-async-get 
+      (ext:attach (http:http-async-get
                     (http-url-encode (movie-image-url movie))
                     *http-proactor* :keep-alive t)
         (lambda (response)
@@ -128,7 +128,12 @@
 (defun http-post-process (item-id)
   (let* ((movie (pgsql:get-dao 'movie-item item-id))
          (img-path (ext:concat "log/images/" (movie-item-image movie)))
-         (suffix (subseq img-path (1+ (position #\. img-path :from-end t)))))
+         (suffix
+           (string-downcase
+             (subseq img-path
+               (1+ (position #\. img-path :from-end t))))))
+    (unless (member suffix '("png" "gif" "jpeg") :test #'string=)
+      (setq suffix "jpeg"))
     (pgsql:query
       (:insert-into 'movie-item-aux
         (:select
@@ -139,10 +144,7 @@
           :from
           (:as
             (:select
-              (:as
-                (case suffix
-                  ("png" (:png2pattern (:pg_read_binary_file img-path)))
-                  ("gif" (:gif2pattern (:pg_read_binary_file img-path)))
-                  (("jpg" "jpeg") (:jpeg2pattern (:pg_read_binary_file img-path))))
+              (:as (:raw (format nil "~A2pattern(pg_read_binary_file('~A'))"
+                                     suffix img-path))
                 'pattern))
             'x))))))
