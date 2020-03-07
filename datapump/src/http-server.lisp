@@ -3,7 +3,7 @@
 
 (in-package :datapump)
 
-(defconstant +public-folder+ "/home/postgres/dbapp/interact/html")
+(defconstant +public-folder+ "/home/postgres/app/interact/html")
 
 ;;; ----------------------------------------------------
 

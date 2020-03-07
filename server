@@ -1,6 +1,6 @@
 #!/bin/sh
 
-SRVHOME=/home/postgres/dbapp/interact
+SRVHOME=/home/postgres/app/interact
 
 while true
 do

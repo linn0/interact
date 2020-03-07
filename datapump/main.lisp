@@ -6,7 +6,7 @@
 ;;;
 
 (require :asdf)
-(defconstant +application-folder+ "/home/postgres/dbapp/interact/")
+(defconstant +application-folder+ "/home/postgres/app/interact/")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (mapc 
