@@ -355,11 +355,6 @@
   (constant (clock-thread-cputime-id "CLOCK_THREAD_CPUTIME_ID"))
   (constant (timer-abstime "TIMER_ABSTIME")))
 
-(cstruct timespec "struct timespec"
-  "UNIX time specification in seconds and nanoseconds."
-  (sec  "tv_sec"  :type time)
-  (nsec "tv_nsec" :type :long))
-
 #-darwin
 (cstruct itimerspec "struct itimerspec"
   "UNIX timer interval and initial expiration."
@@ -598,7 +593,6 @@
 (constant (cflag-VSWTC "VSWTC"))
 (constant (cflag-VSTART "VSTART"))
 (constant (cflag-VSTOP "VSTOP"))
-(constant (cflag-VDSUSP "VDSUSP"))
 (constant (cflag-VSUSP "VSUSP"))
 (constant (cflag-VEOL "VEOL"))
 (constant (cflag-VREPRINT "VREPRINT"))
@@ -606,7 +600,6 @@
 (constant (cflag-VWERASE "VWERASE"))
 (constant (cflag-VLNEXT "VLNEXT"))
 (constant (cflag-VEOL2 "VEOL2"))
-(constant (cflag-VSTATUS "VSTATUS"))
 
 (constant (TCSANOW "TCSANOW"))
 (constant (TCSADRAIN "TCSADRAIN"))
@@ -769,8 +762,6 @@
 
   (constant (tiocmiwait "TIOCMIWAIT"))
   (constant (tiocgicount "TIOCGICOUNT"))
-  (constant (tiocghayesesp "TIOCGHAYESESP"))
-  (constant (tiocshayesesp "TIOCSHAYESESP"))
   (constant (fioqsize "FIOQSIZE")))
 
 ;;;; from wait.h

@@ -49,6 +49,7 @@
 	   :initarg :prompt)))
 
 (defmethod initialize-instance :after ((editor editor) &rest initargs &key history killring)
+  (declare (ignore initargs))
   (let ((history (ensure-buffer (or history *history*))))
     (unless *history*
       (setf *history* history))
@@ -238,11 +239,12 @@ empty string."
 
 (defun editor-replace-word (editor word)
   (with-editor-point-and-string ((point string) editor)
+    (declare (ignore point))
     (let ((start (editor-word-start editor))
 	  (end (editor-word-end editor)))
       (setf (get-string editor)
-	    (concat (subseq string 0 start) word (subseq string end))
-	    (get-point editor) (+ start (length word))))))
+        (concat (subseq string 0 start) word (subseq string end))
+        (get-point editor) (+ start (length word))))))
 
 (defun in-quoted-string-p (editor)
   (quoted-p (get-string editor) (get-point editor)))

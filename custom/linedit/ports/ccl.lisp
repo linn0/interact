@@ -21,9 +21,6 @@
 
 (in-package :linedit)
 
-#-ccl
-(error "Attempt to load a CCL-specific file in another implementation.")
-
 #+nil (defun toplevel-read (&key (input-stream *standard-input*)
                            (output-stream *standard-output*)
                            (prompt-function #'print-listener-prompt)
@@ -66,6 +63,7 @@
     ;; whether or not the result(s) of evaluating the form should be
     ;; printed.
     (defmethod ccl::read-toplevel-form ((in ccl:input-stream) &key eof-value file-name &allow-other-keys)
+      (declare (ignore eof-value))
       (flet ((repl-reader ()
 	       (let ((prompt (with-output-to-string (s)
 			       ;; KLUDGE: Gross, but *quiet-flag* can't be bound.

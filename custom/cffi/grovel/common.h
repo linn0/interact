@@ -15,7 +15,7 @@
 #define indirect_stringify(x) stringify(x)
 
 #define TYPE_SIGNED_P(type) (((type)-1)<0LL)
-#define _64_BIT_VALUE_FITS_SIGNED_P(value) ( (value) <= 0x7FFFFFFFFFFFFFFFLL )
+#define _64_BIT_VALUE_FITS_SIGNED_P(value) ((uint64_t) (value) <= 0x7FFFFFFFFFFFFFFFLL )
 #define SLOT_SIGNED_P(result, type, slot)				\
   do { 									\
     type slot_signed_p_struct; 						\

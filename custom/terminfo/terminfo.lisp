@@ -1000,32 +1000,11 @@ apparently used 542 (#o1036) in practice.")
       (if (or (null fd) (integerp fd)) fd (stream-fileno fd)))))
 
 (defun stream-baud-rate (stream)
-  (declare (type stream stream)
-	   (values (or null (integer 0 4000000))))
-  #+CMU
-  (alien:with-alien ((termios (alien:struct unix:termios)))
-    (declare (optimize (ext:inhibit-warnings 3)))
-    (when (unix:unix-tcgetattr (stream-fileno stream) termios)
-      (let ((baud (logand unix:tty-cbaud
-			  (alien:slot termios 'unix:c-cflag))))
-	(if (< baud unix::tty-cbaudex)
-	  (aref #(0 50 75 110 134 150 200 300 600 1200
-		  1800 2400 4800 9600 19200 38400)
-		baud)
-	  (aref #(57600 115200 230400 460800 500000 576000
-		  921600 1000000 1152000 1500000 2000000
-		  2500000 3000000 3500000 4000000)
-		(logxor baud unix::tty-cbaudex)))))))
+  (declare (ignore stream)))
 
 (defun terminal-size (&optional (stream *terminal-io*))
-  (declare (type stream stream))
-  #+CMU
-  (alien:with-alien ((winsz (alien:struct unix:winsize)))
-    (declare (optimize (ext:inhibit-warnings 3)))
-    (if (unix:unix-ioctl (stream-fileno stream) unix:TIOCGWINSZ winsz)
-	(values (alien:slot winsz 'unix:ws-row)
-		(alien:slot winsz 'unix:ws-col))
-	(values nil nil))))
+  (declare (ignore stream))
+  (values nil nil))
 
 (defstruct padding time force line-multiplier)
 

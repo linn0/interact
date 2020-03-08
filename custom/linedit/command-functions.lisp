@@ -63,10 +63,9 @@
 (defun delete-word-forwards (chord editor)
   (declare (ignore chord))
   (with-editor-point-and-string ((point string) editor)
-    (let ((i (get-point editor))
-          (j (editor-next-word-end editor)))
+    (let ((j (editor-next-word-end editor)))
       (setf (get-string editor)
-            (concat (subseq string 0 i) (subseq string j))))))
+            (concat (subseq string 0 point) (subseq string j))))))
 
 (defun delete-word-backwards (chord editor)
   (declare (ignore chord))
@@ -151,6 +150,7 @@
 (defvar *history-needle* nil)
 
 (defun history-search-needle (editor &key direction)
+  (declare (ignore direction))
   (let ((text (if *history-search*
                   (cond ((and *history-needle*
                               (member *last-command* '(search-history-backwards
@@ -270,6 +270,7 @@
 (defun kill-sexp (chord editor)
   (declare (ignore chord))
   (with-editor-point-and-string ((point string) editor)
+    (declare (ignore point))
     (let ((start (editor-sexp-start editor))
           (end (min (1+ (editor-sexp-end editor)) (length string))))
       (buffer-push (subseq string start end) (editor-killring editor))

@@ -299,8 +299,9 @@
   (ctype blkcnt "long"))
 
 (cstruct timespec "struct timespec"
-   (sec      "tv_sec"  :type time)
-   (nsec     "tv_nsec" :type :long))
+  "UNIX time specification in seconds and nanoseconds."
+  (sec  "tv_sec"  :type time)
+  (nsec "tv_nsec" :type :long))
 
 (cstruct stat "struct stat"
   (dev     "st_dev"     :type #-mips dev #+mips :unsigned-long)

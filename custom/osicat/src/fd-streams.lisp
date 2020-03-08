@@ -74,3 +74,11 @@
                         :element-type element-type
                         :external-format external-format
                         :pathname pathname :file file)))
+
+#+ccl
+(defun make-fd-stream (fd &key direction element-type external-format
+                       pathname file)
+  (declare (ignore pathname file))
+  (ccl::make-fd-stream fd :direction direction
+                       :element-type element-type
+                       :encoding external-format))

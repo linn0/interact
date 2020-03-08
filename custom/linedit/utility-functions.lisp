@@ -74,6 +74,7 @@ open-args passed to `open'."
   ;; Don't save the query response.
   (let ((*history* nil)
         (*killring* nil))
+    (declare (ignore *history* *killring*))
     (loop
       (let ((result (linedit :prompt (format nil "~? (y or n) " control args))))
         (cond
