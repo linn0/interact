@@ -21,10 +21,6 @@
 
 (in-package :linedit)
 
-(defun pathname-directory-pathname (pathname)
-  (make-pathname :name nil :type nil
-		 :defaults pathname))
-
 (defun underlying-directory-p (pathname)
   (case (file-kind pathname)
     (:directory t)
@@ -108,7 +104,7 @@ to the appropriate home directory."
 	 (all nil)
 	 (max 0)
 	 (string (tilde-expand-string string))
-	 (dir (pathname-directory-pathname string))
+	 (dir (osicat:pathname-directory-pathname string))
 	 (namefun (if (relative-pathname-p string)
 		      #'namestring
 		      (lambda (x) (namestring (merge-pathnames x))))))

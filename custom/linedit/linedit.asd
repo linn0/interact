@@ -31,9 +31,12 @@
   :author "Nikodemus Siivola <nikodemus@random-state.net>"
   :maintainer "Anmol Khirbat <anmol@khirbat.net>"
   :homepage "https://github.com/sharplispers/linedit"
-  :depends-on (:cffi :terminfo :osicat :alexandria)
+  :depends-on (:cffi :osicat :alexandria)
   :components
   (
+   ;; Terminfo
+   (:file "terminfo")
+
    ;; Common
    (:file "packages")
    (:file "utility-functions" :depends-on ("packages"))
@@ -58,10 +61,4 @@
    (:file "main" :depends-on ("editor"))
    (:file "complete" :depends-on ("utility-macros"))
    (:file "command-functions" :depends-on ("editor"))
-   (:module "ports"
-            :depends-on ("main")
-            :serial t
-            :components
-            ((:file "sbcl" :if-feature :sbcl)
-             (:file "ccl" :if-feature :ccl)
-             (:file "generic" :if-feature (:not (:or :sbcl :ccl)))))))
+   (:file "ccl" :depends-on ("main"))))
