@@ -15,6 +15,7 @@
   :components ((:module "src"
                 :components
                 ((:file "package")
+                 (:file "defs")
                  (:file "site-dao")
                  (:file "task-scheduler")
                  (:file "http-client")

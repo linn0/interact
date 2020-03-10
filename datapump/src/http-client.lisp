@@ -5,8 +5,6 @@
 
 (in-package :datapump)
 
-(defconstant +http-images-folder+ "/home/postgres/dbapp/interact/html/images/")
-
 (defvar *http-proactor* (ext:make-device-proactor))
 
 (defun url-resolve (base reference)

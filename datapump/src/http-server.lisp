@@ -3,8 +3,6 @@
 
 (in-package :datapump)
 
-(defconstant +public-folder+ "/home/postgres/app/interact/html")
-
 ;;; ----------------------------------------------------
 
 (http:define-http-router http-url-router
