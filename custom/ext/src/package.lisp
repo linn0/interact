@@ -210,4 +210,7 @@
            ;; async socket
            #:make-async-socket #:async-connect #:async-write 
            #:async-read #:async-read-until #:async-read-some
-           #:make-device-proactor #:register))
+           #:make-device-proactor #:register
+
+           ;; async ssl socket
+           #:make-async-ssl-socket))

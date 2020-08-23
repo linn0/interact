@@ -64,6 +64,7 @@
                   :components
                   ((:file "utils")
                    (:file "async-socket")
+                   (:file "async-ssl")
                    (:file "proactor")))
 
                  #+windows-target

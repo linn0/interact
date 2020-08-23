@@ -1,0 +1,366 @@
+
+(in-package #:ext)
+
+(defvar *foreign-libraries* nil)
+(defconstant +default-read-buffer-size+ 4096)
+(defconstant +default-write-buffer-size+ 4096)
+(defconstant +ssl-error-want-read+ 2)
+(defconstant +ssl-error-want-write+ 3)
+
+(defun make-ssl-error (stream where errno)
+  (setq errno (abs errno))
+  (let* ((errmsg-buffer-size 1024)
+         (errmsg-buffer (#_malloc errmsg-buffer-size))
+         errmsg)
+    (do () ((eq errno 0))
+      (external-call "ERR_error_string_n" :signed-fullword errno 
+                                          :address errmsg-buffer 
+                                          :signed-fullword errmsg-buffer-size)
+      (setf errmsg (concatenate '(vector (unsigned-byte 8)) errmsg 
+        (make-vector-from-carray errmsg-buffer (#_strlen errmsg-buffer))))
+      (setq errno (external-call "ERR_get_error" :unsigned-fullword)))
+
+    (#_free errmsg-buffer)
+    (make-condition 'socket-error
+      :stream stream
+      :code errno
+      :identifier :unknown
+      :situation where
+      :format-control "~a (error #~d) during ~a"
+      :format-arguments
+        (list
+          (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
+          errno where))))
+
+(defclass socket-request ()
+  ((type :initarg :type :initform nil :reader socket-request-type)
+   (state :initarg :state :initform :new :accessor socket-request-state)
+   (buffer :initarg :buffer :initform nil :reader socket-request-buffer)
+   (buffer-size :initarg :buffer-size :initform 0 :reader socket-request-buffer-size)
+   (data-size :initarg :data-size :initform 0 :reader socket-request-data-size)
+   (data :initarg :data :initform nil :accessor socket-request-data)
+   (condition :initarg :condition :initform nil :accessor socket-request-condition)
+   (callback :initarg :callback :initform nil :accessor socket-request-callback)
+   (errback :initarg :errback :initform nil :accessor socket-request-errback)))
+
+(defclass async-ssl-socket ()
+  ((device :reader async-socket-device)
+   (remote-address :initarg :remote-address :reader async-socket-remote-address)
+   (request-queue :initform (make-queue) :reader async-socket-request-queue)
+   (buffer :initform nil :accessor async-socket-buffer)
+   (proactor :initform nil :accessor async-socket-proactor)
+   (timer :initform nil :accessor async-socket-timer)
+   (connect-timeout :initarg :connect-timeout :initform nil :reader async-socket-connect-timeout)
+   (input-timeout :initarg :input-timeout :initform nil :reader async-socket-input-timeout)
+   (output-timeout :initarg :output-timeout :initform nil :reader async-socket-output-timeout)
+   (ssl :initarg :ssl :initform nil :accessor async-socket-ssl)
+   (ssl-context :initarg :ssl-context :initform nil :accessor async-socket-ssl-context)))
+
+(defmethod initialize-instance :after ((socket async-ssl-socket) &rest initargs)
+  (declare (ignore initargs))
+  (with-slots (device remote-address timer ssl-context ssl) socket
+    (unless remote-address
+      (error 'simple-error
+             :format-control "~a"
+             :format-arguments '("remote-address initarg nil")))
+    (setq device (#_socket #$AF_INET #$SOCK_STREAM #$IPPROTO_TCP))
+    (ccl::set-socket-fd-blocking device nil)
+    (setq timer (make-timer (lambda () (cancel-async-io socket))))
+    (setq ssl-context
+      (external-call "SSL_CTX_new" :address
+        (external-call "SSLv23_client_method" :address) :address))
+    (setq ssl (external-call "SSL_new" :address ssl-context :address))))
+
+(defmethod close ((socket async-ssl-socket) &key abort)
+  (declare (ignore abort))
+  (with-slots (ssl ssl-context device proactor) socket
+    (remove-device proactor device)
+    (external-call "SSL_free" :address ssl)
+    (external-call "SSL_CTX_free" :address ssl-context)
+    (#_close device)
+    (remove-timeout-handler socket)
+    (setq device nil)))
+
+(defmethod cancel-async-io ((socket async-ssl-socket))
+  (with-slots (device request-queue) socket
+    (let ((request (queue-peek request-queue)))
+      (if request
+        (format t "~s ~d timeout during ~a~%" socket device 
+          (concatenate 'string "ASYNC-" 
+            (symbol-name (socket-request-type request))))))
+    (if device
+      (close socket))))
+
+(defmethod set-timeout-handler ((socket async-ssl-socket) timeout)
+  (if (numberp timeout)
+    (with-slots (proactor timer) socket
+      (schedule-timer-relative (device-proactor-scheduler proactor) timer timeout))))
+
+(defmethod remove-timeout-handler ((socket async-ssl-socket))
+  (with-slots (proactor timer) socket
+    (unschedule-timer (device-proactor-scheduler proactor) timer)))
+
+(defmethod async-connect ((socket async-ssl-socket))
+  (with-slots (device proactor remote-address request-queue connect-timeout) socket
+    (prog1 (create-promise
+             (lambda (resolver rejecter)
+               (queue-push request-queue 
+                 (make-instance 'socket-request 
+                                :type :connect
+                                :callback resolver
+                                :errback rejecter))
+               (register-events proactor socket (logior EPOLLOUT EPOLLRDHUP))))
+      (set-timeout-handler socket connect-timeout)
+      ; actually, SOCKET can pass as it is, but without a related type designator
+      (if (> 0 (#_connect device
+                  (ccl::sockaddr remote-address) 
+                  (ccl::sockaddr-length remote-address)))
+        (let ((errno (ccl::%get-errno)))
+          (if (/= errno (- #$EINPROGRESS))
+            (linux-socket-error device "connect" errno)))))))
+
+(defmethod finish-socket-request ((socket async-ssl-socket))
+  (with-slots (proactor request-queue) socket
+    (let ((request (queue-peek request-queue)))
+      (with-slots (state data buffer type) request
+        (setf state :completed)
+        (setf data nil)
+        (queue-pop request-queue :wait-p 1)
+        (if buffer (#_free buffer))))))
+
+(defmethod handle-events ((socket async-ssl-socket) events)
+  (with-slots (device proactor request-queue) socket
+    (let ((request (queue-peek request-queue)))
+      (if request
+        (ecase (socket-request-type request)
+          (:connect
+            (handle-connect socket))
+          (:handshake
+            (handshake socket events))
+          (:write
+            (if (logand events EPOLLOUT)
+              (send-data socket)))
+          ((:read-some :read-until :read)
+            (recv-data socket events)))))))
+
+(defmethod handle-connect ((socket async-ssl-socket) events)
+  (with-slots (device ssl proactor request-queue output-timeout) socket
+    ; remember to free the overlapped io buffer
+    (let ((request (queue-peek request-queue))
+          value)
+      (setf (socket-request-state request) :running)
+
+      (with-slots (data data-size buffer buffer-size callback errback) request
+        (setq value
+          (external-call "SSL_set_fd" :address ssl :int device :int))
+
+        (if (/= value 1)
+          (remove-timeout-handler socket)
+          (funcall errback (make-ssl-error device "CONNECT" errno))
+          (finish-socket-request socket)
+          (return-from handshake))
+
+        ;; finished an operation
+        (external-call "SSL_set_connect_state" :address ssl)
+        (setf (socket-request-type request) :handshake)
+        (handshake socket events)))))
+
+(defmethod handshake ((socket async-ssl-socket) events)
+  (with-slots (device ssl proactor request-queue output-timeout) socket
+    ; remember to free the overlapped io buffer
+    (let ((request (queue-peek request-queue))
+          value)
+      (setf (socket-request-state request) :running)
+
+      (with-slots (data data-size buffer buffer-size callback errback) request
+        (setq value
+          (external-call "SSL_do_handshake" :address ssl :int))
+
+        (if (/= value 1)
+          (let ((errno (external-call "SSL_get_error" :address ssl :int value :int)))
+            (case errno
+              (+ssl-error-want-write+
+                (register-events proactor socket (logior EPOLLOUT EPOLLRDHUP)))
+              (+ssl-error-want-read+
+                (register-events proactor socket (logior EPOLLIN EPOLLRDHUP)))
+              (otherwise
+                (remove-timeout-handler socket)
+                (funcall errback (make-ssl-error device "HANDSHAKE" errno))
+                (finish-socket-request socket)))
+            (return-from handshake)))
+
+        ;; finished an operation
+        (remove-timeout-handler socket)
+        (funcall callback)
+        (finish-socket-request socket)))))
+
+(defmethod send-data ((socket async-ssl-socket))
+  (with-slots (device ssl proactor request-queue output-timeout) socket
+    ; remember to free the overlapped io buffer
+    (let ((request (queue-peek request-queue))
+          nwriten)
+      (setf (socket-request-state request) :running)
+
+      (with-slots (data data-size buffer buffer-size callback errback) request
+        (let* ((wdata (subseq data data-size))
+               (size (length wdata)))
+          (if (> size buffer-size)
+            (setq size buffer-size))
+          (dotimes (index size)
+            (setf (paref buffer (:array :unsigned-byte) index) (aref wdata index)))
+          (setq nwriten
+            (external-call "SSL_write" :address ssl :address buffer :int size :int)))
+
+        (if (< nwriten 0)
+          (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
+            (remove-timeout-handler socket)
+            (funcall errback (make-ssl-error device "ASYNC-WRITE" errno))
+            (finish-socket-request socket)
+            (return-from send-data)))
+
+        (setf data-size (+ data-size nwriten))
+
+        (if (> (length data) data-size)
+          (return-from send-data))
+
+        ;; finished an operation
+        (remove-timeout-handler socket)
+        (funcall callback data-size)
+        (finish-socket-request socket)))))
+
+; send a vector of binary data
+(defmethod async-write ((socket async-ssl-socket) data)
+  (create-promise
+    (lambda (resolver rejecter)
+      (with-slots (proactor request-queue output-timeout) socket
+        (let ((buffer-size +default-write-buffer-size+))
+          (queue-push request-queue
+            (make-instance 'socket-request
+              :type :write
+              :buffer (#_malloc buffer-size)
+              :buffer-size buffer-size
+              :data data
+              :data-size 0
+              :callback resolver
+              :errback rejecter)))
+        (set-timeout-handler socket output-timeout)
+        (register-events proactor socket (logior EPOLLOUT EPOLLRDHUP))))))
+
+(defmethod recv-data ((socket async-ssl-socket) events)
+  (with-slots (ssl device proactor request-queue) socket
+    ; remember to free the overlapped io buffer
+    (let ((request (queue-peek request-queue)))
+      (with-slots (data data-size buffer-size type state condition callback errback) request
+
+        (when (and (eq state :new) (> (length (async-socket-buffer socket)) 0))
+          (setf data (async-socket-buffer socket))
+          (let ((position (funcall condition data)))
+            (when position
+              (setf (async-socket-buffer socket) (subseq data position))
+              (remove-timeout-handler socket)
+              (funcall callback (subseq data 0 position))
+              (finish-socket-request socket)
+              (return-from recv-data))))
+
+        (when (eq state :new)
+          (setf state :running)
+          (register-events proactor socket (logior EPOLLIN EPOLLRDHUP)))
+
+        (if (logand events EPOLLIN)
+          (let ((size) (nread))
+            (ecase type
+              (:read (setq size (min 
+                                  (- data-size (length data)) 
+                                  buffer-size)))
+              ((:read-some :read-until) (setq size buffer-size)))
+            (setq nread
+              (external-call "SSL_read" :address ssl
+                :address (socket-request-buffer request)
+                :int size :int))
+
+            (if (< nread 0)
+              (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
+                (when (/= errno (- #$EAGAIN))
+                  (remove-timeout-handler socket)
+                  (funcall errback (make-ssl-error device "ASYNC-READ" errno))
+                  (finish-socket-request socket))
+                (return-from recv-data))
+
+              (let ((buffer (socket-request-buffer request)))
+                (setf data (concatenate '(vector (unsigned-byte 8)) data 
+                             (make-vector-from-carray buffer nread)))
+                (let ((position (funcall condition data)))
+                  (cond
+                    ((eq nread 0)
+                      (setf (async-socket-buffer socket) nil)
+                      (remove-timeout-handler socket)
+                      (funcall callback data))
+                    (position
+                      (setf (async-socket-buffer socket) (subseq data position))
+                      (remove-timeout-handler socket)
+                      (funcall callback (subseq data 0 position)))
+                    (t
+                      (return-from recv-data)))
+                  ;; finished an operation
+                  (finish-socket-request socket))))))))))
+
+; receive a vector of binary data
+(defmethod async-receive ((socket async-ssl-socket) type size condition)
+  (create-promise
+    (lambda (resolver rejecter)
+      (with-slots (request-queue proactor input-timeout) socket
+        (let ((buffer-size 
+                (ecase type
+                  (:read +default-read-buffer-size+)
+                  ((:read-some :read-until) (if size size +default-read-buffer-size+)))))
+          (queue-push request-queue
+            (make-instance 'socket-request 
+              :type type
+              :buffer (#_malloc buffer-size)
+              :buffer-size buffer-size
+              :data-size size
+              :condition condition
+              :callback resolver
+              :errback rejecter)))
+        (set-timeout-handler socket input-timeout)
+        (register-events proactor socket (logior EPOLLIN EPOLLOUT EPOLLRDHUP))))))
+
+; receive a vector of binary data
+(defmethod async-read-some ((socket async-ssl-socket) &optional size)
+  (async-receive socket :read-some size
+    (lambda (data) (if data (length data)))))
+
+; receive a vector of binary data
+(defmethod async-read ((socket async-ssl-socket) size)
+  (async-receive socket :read size 
+    (lambda (data) (if (>= (length data) size) size))))
+
+; receive a vector of binary data
+(defmethod async-read-until ((socket async-ssl-socket) condition)
+  (async-receive socket :read-until nil condition))
+
+(defun make-async-ssl-socket (&key
+                      (address-family :internet)
+                      remote-host remote-port
+                      connect-timeout input-timeout output-timeout
+                      keepalive
+                      proactor)
+  "Create and return a new async SSL socket."
+  (declare (ignore keepalive))
+  (unless *foreign-libraries*
+    (nconc *foreign-libraries*
+      (mapcar (lambda (lib) (open-shared-library lib))
+        '("libcrypto.so" "libssl.so")))
+
+    (external-call "SSL_library_init")
+    (external-call "SSL_load_error_strings"))
+
+  (let ((socket (make-instance 'async-ssl-socket :remote-address 
+                  (resolve-address :address-family address-family 
+                                   :host remote-host :port remote-port)
+                  :connect-timeout connect-timeout
+                  :input-timeout input-timeout
+                  :output-timeout output-timeout)))
+    (if proactor 
+      (register proactor socket))
+    socket))
