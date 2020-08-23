@@ -1,6 +1,17 @@
 
 (in-package #:ext)
 
+(defclass socket-request ()
+  ((type :initarg :type :initform nil :accessor socket-request-type)
+   (state :initarg :state :initform :new :accessor socket-request-state)
+   (buffer :initarg :buffer :initform nil :reader socket-request-buffer)
+   (buffer-size :initarg :buffer-size :initform 0 :reader socket-request-buffer-size)
+   (data-size :initarg :data-size :initform 0 :reader socket-request-data-size)
+   (data :initarg :data :initform nil :accessor socket-request-data)
+   (condition :initarg :condition :initform nil :accessor socket-request-condition)
+   (callback :initarg :callback :initform nil :accessor socket-request-callback)
+   (errback :initarg :errback :initform nil :accessor socket-request-errback)))
+
 (def-foreign-type epoll_data_t
   (:union :epoll_data
      (:ptr :address)

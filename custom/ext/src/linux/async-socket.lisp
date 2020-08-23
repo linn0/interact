@@ -4,17 +4,6 @@
 (defconstant +default-read-buffer-size+ 4096)
 (defconstant +default-write-buffer-size+ 4096)
 
-(defclass socket-request ()
-  ((type :initarg :type :initform nil :reader socket-request-type)
-   (state :initarg :state :initform :new :accessor socket-request-state)
-   (buffer :initarg :buffer :initform nil :reader socket-request-buffer)
-   (buffer-size :initarg :buffer-size :initform 0 :reader socket-request-buffer-size)
-   (data-size :initarg :data-size :initform 0 :reader socket-request-data-size)
-   (data :initarg :data :initform nil :accessor socket-request-data)
-   (condition :initarg :condition :initform nil :accessor socket-request-condition)
-   (callback :initarg :callback :initform nil :accessor socket-request-callback)
-   (errback :initarg :errback :initform nil :accessor socket-request-errback)))
-
 (defclass async-socket ()
   ((device :reader async-socket-device)
    (remote-address :initarg :remote-address :reader async-socket-remote-address)

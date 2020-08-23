@@ -32,17 +32,6 @@
           (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
           errno where))))
 
-(defclass socket-request ()
-  ((type :initarg :type :initform nil :reader socket-request-type)
-   (state :initarg :state :initform :new :accessor socket-request-state)
-   (buffer :initarg :buffer :initform nil :reader socket-request-buffer)
-   (buffer-size :initarg :buffer-size :initform 0 :reader socket-request-buffer-size)
-   (data-size :initarg :data-size :initform 0 :reader socket-request-data-size)
-   (data :initarg :data :initform nil :accessor socket-request-data)
-   (condition :initarg :condition :initform nil :accessor socket-request-condition)
-   (callback :initarg :callback :initform nil :accessor socket-request-callback)
-   (errback :initarg :errback :initform nil :accessor socket-request-errback)))
-
 (defclass async-ssl-socket ()
   ((device :reader async-socket-device)
    (remote-address :initarg :remote-address :reader async-socket-remote-address)
@@ -134,7 +123,7 @@
       (if request
         (ecase (socket-request-type request)
           (:connect
-            (handle-connect socket))
+            (handle-connect socket events))
           (:handshake
             (handshake socket events))
           (:write
@@ -150,22 +139,23 @@
           value)
       (setf (socket-request-state request) :running)
 
-      (with-slots (data data-size buffer buffer-size callback errback) request
-        (setq value
-          (external-call "SSL_set_fd" :address ssl :int device :int))
+      (setq value
+        (external-call "SSL_set_fd" :address ssl :int device :int))
 
-        (if (/= value 1)
-          (remove-timeout-handler socket)
-          (funcall errback (make-ssl-error device "CONNECT" errno))
-          (finish-socket-request socket)
-          (return-from handshake))
+      (when (/= value 1)
+        (remove-timeout-handler socket)
+        (funcall (socket-request-errback request)
+          (make-ssl-error device "ASYNC-CONNECT" value))
+        (finish-socket-request socket)
+        (return-from handle-connect))
 
-        ;; finished an operation
-        (external-call "SSL_set_connect_state" :address ssl)
-        (setf (socket-request-type request) :handshake)
-        (handshake socket events)))))
+      ;; finished an operation
+      (external-call "SSL_set_connect_state" :address ssl)
+      (setf (socket-request-type request) :handshake)
+      (handshake socket events))))
 
 (defmethod handshake ((socket async-ssl-socket) events)
+  (declare (ignore events))
   (with-slots (device ssl proactor request-queue output-timeout) socket
     ; remember to free the overlapped io buffer
     (let ((request (queue-peek request-queue))
@@ -279,7 +269,7 @@
                 :int size :int))
 
             (if (< nread 0)
-              (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
+              (let ((errno (external-call "SSL_get_error" :address ssl :int nread :int)))
                 (when (/= errno (- #$EAGAIN))
                   (remove-timeout-handler socket)
                   (funcall errback (make-ssl-error device "ASYNC-READ" errno))
@@ -350,7 +340,7 @@
   (unless *foreign-libraries*
     (nconc *foreign-libraries*
       (mapcar (lambda (lib) (open-shared-library lib))
-        '("libcrypto.so" "libssl.so")))
+        '("/lib64/libcrypto.so" "/lib64/libssl.so")))
 
     (external-call "SSL_library_init")
     (external-call "SSL_load_error_strings"))
