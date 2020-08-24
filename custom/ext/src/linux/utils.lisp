@@ -12,6 +12,12 @@
    (callback :initarg :callback :initform nil :accessor socket-request-callback)
    (errback :initarg :errback :initform nil :accessor socket-request-errback)))
 
+(defvar *foreign-libraries* nil)
+(defconstant +default-read-buffer-size+ 4096)
+(defconstant +default-write-buffer-size+ 4096)
+(defconstant +ssl-error-want-read+ 2)
+(defconstant +ssl-error-want-write+ 3)
+
 (def-foreign-type epoll_data_t
   (:union :epoll_data
      (:ptr :address)
@@ -79,3 +85,31 @@ conditions, based on the state of the arguments."
   (if (< res 0)
     (linux-socket-error stream where res)
     res))
+
+(defun make-ssl-error (stream where errno)
+  (setq errno (abs errno))
+  (let* ((errmsg-buffer-size 1024)
+         (errmsg-buffer (#_malloc errmsg-buffer-size))
+         errmsg)
+    (do () ((eq errno 0))
+      (external-call "ERR_error_string_n" :signed-fullword errno
+                                          :address errmsg-buffer
+                                          :signed-fullword errmsg-buffer-size)
+      (setf errmsg (concatenate '(vector (unsigned-byte 8)) errmsg
+        (make-vector-from-carray errmsg-buffer (#_strlen errmsg-buffer))))
+      (setq errno (external-call "ERR_get_error" :unsigned-fullword)))
+
+    (#_free errmsg-buffer)
+    (format t "~a (error #~d) during ~a~%"
+      (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
+      errno where)
+    (make-condition 'socket-error
+      :stream stream
+      :code errno
+      :identifier :unknown
+      :situation where
+      :format-control "~a (error #~d) during ~a"
+      :format-arguments
+        (list
+          (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
+          errno where))))

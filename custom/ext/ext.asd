@@ -63,9 +63,9 @@
                  (:module "linux"
                   :components
                   ((:file "utils")
+                   (:file "proactor")
                    (:file "async-socket")
-                   (:file "async-ssl")
-                   (:file "proactor")))
+                   (:file "async-ssl")))
 
                  #+windows-target
                  (:module "windows"

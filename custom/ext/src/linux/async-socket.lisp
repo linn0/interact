@@ -1,19 +1,16 @@
 
 (in-package #:ext)
 
-(defconstant +default-read-buffer-size+ 4096)
-(defconstant +default-write-buffer-size+ 4096)
-
 (defclass async-socket ()
-  ((device :reader async-socket-device)
-   (remote-address :initarg :remote-address :reader async-socket-remote-address)
-   (request-queue :initform (make-queue) :reader async-socket-request-queue)
+  (device
+   (remote-address :initarg :remote-address)
+   (request-queue :initform (make-queue))
    (buffer :initform nil :accessor async-socket-buffer)
-   (proactor :initform nil :accessor async-socket-proactor)
-   (timer :initform nil :accessor async-socket-timer)
-   (connect-timeout :initarg :connect-timeout :initform nil :reader async-socket-connect-timeout)
-   (input-timeout :initarg :input-timeout :initform nil :reader async-socket-input-timeout)
-   (output-timeout :initarg :output-timeout :initform nil :reader async-socket-output-timeout)))
+   (proactor :initform nil)
+   (timer :initform nil)
+   (connect-timeout :initarg :connect-timeout :initform nil)
+   (input-timeout :initarg :input-timeout :initform nil)
+   (output-timeout :initarg :output-timeout :initform nil)))
 
 (defmethod initialize-instance :after ((socket async-socket) &rest initargs)
   (declare (ignore initargs))
@@ -25,6 +22,12 @@
     (setq device (#_socket #$AF_INET #$SOCK_STREAM #$IPPROTO_TCP))
     (ccl::set-socket-fd-blocking device nil)
     (setq timer (make-timer (lambda () (cancel-async-io socket))))))
+
+(defmethod async-socket-device ((socket async-socket))
+  (slot-value socket 'device))
+
+(defmethod async-socket-set-proactor ((socket async-socket) proactor)
+  (setf (slot-value socket 'proactor) proactor))
 
 (defmethod cancel-async-io ((socket async-socket))
   (with-slots (device request-queue) socket
@@ -86,11 +89,11 @@
     (let ((request (queue-peek request-queue)))
       (if request
         (ecase (socket-request-type request)
-          (:connect 
+          (:connect
             (remove-timeout-handler socket)
             (funcall (socket-request-callback request))
             (finish-socket-request socket))
-          (:write 
+          (:write
             (if (logand events EPOLLOUT) 
               (send-data socket)))
           ((:read-some :read-until :read)

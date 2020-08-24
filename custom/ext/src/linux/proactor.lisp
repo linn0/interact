@@ -1,6 +1,39 @@
 
 (in-package #:ext)
 
+(defgeneric async-socket-device (socket)
+  (:documentation "return socket device file descriptor."))
+
+(defgeneric async-socket-set-proactor (socket proactor)
+  (:documentation "set a socket's proactor."))
+
+(defgeneric async-connect (socket)
+  (:documentation "async connect a socket."))
+
+(defgeneric send-data (socket)
+  (:documentation "async send data to a socket."))
+
+(defgeneric recv-data (socket events)
+  (:documentation "async receive data from a socket."))
+
+(defgeneric async-write (socket data)
+  (:documentation "async write data to a socket."))
+
+(defgeneric async-receive (socket type size condition)
+  (:documentation "async receive data from a socket."))
+
+(defgeneric async-read (socket size)
+  (:documentation "async read data from a socket."))
+
+(defgeneric async-read-until (socket condition)
+  (:documentation "async read data until condition  satisfied from a socket."))
+
+(defgeneric async-read-some (socket &optional size)
+  (:documentation "async read some data from a socket."))
+
+(defgeneric handle-events (socket events)
+  (:documentation "handle IO events on a socket."))
+
 (defclass device-proactor ()
   ((epollfd :reader device-proactor-epollfd)
    (device-table :initform nil)
@@ -44,19 +77,19 @@
              :signed-fullword))
     (linux-socket-error device "epoll_ctl" (ccl::%get-errno))))
 
-(defmethod register ((proactor device-proactor) (socket async-socket))
+(defmethod register ((proactor device-proactor) socket)
   (with-slots (epollfd device-table) proactor
-    (with-slots (device) socket
+    (let ((device (async-socket-device socket)))
       (setf (gethash device device-table) socket)
-      (setf (async-socket-proactor socket) proactor)
+      (async-socket-set-proactor socket proactor)
       (let ((event (make-record :epoll_event :events 0)))
         (setf (pref event :epoll_event.data.fd) device)
         (epoll_ctl epollfd EPOLL_CTL_ADD device event)
         (free event)))))
 
-(defmethod register-events ((proactor device-proactor) (socket async-socket) events)
+(defmethod register-events ((proactor device-proactor) socket events)
   (with-slots (epollfd) proactor
-    (with-slots (device) socket
+    (let ((device (async-socket-device socket)))
       (let ((event (make-record :epoll_event :events events)))
         (setf (pref event :epoll_event.data.fd) device)
         (epoll_ctl epollfd EPOLL_CTL_MOD device event)

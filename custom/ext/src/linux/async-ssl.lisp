@@ -1,49 +1,18 @@
 
 (in-package #:ext)
 
-(defvar *foreign-libraries* nil)
-(defconstant +default-read-buffer-size+ 4096)
-(defconstant +default-write-buffer-size+ 4096)
-(defconstant +ssl-error-want-read+ 2)
-(defconstant +ssl-error-want-write+ 3)
-
-(defun make-ssl-error (stream where errno)
-  (setq errno (abs errno))
-  (let* ((errmsg-buffer-size 1024)
-         (errmsg-buffer (#_malloc errmsg-buffer-size))
-         errmsg)
-    (do () ((eq errno 0))
-      (external-call "ERR_error_string_n" :signed-fullword errno 
-                                          :address errmsg-buffer 
-                                          :signed-fullword errmsg-buffer-size)
-      (setf errmsg (concatenate '(vector (unsigned-byte 8)) errmsg 
-        (make-vector-from-carray errmsg-buffer (#_strlen errmsg-buffer))))
-      (setq errno (external-call "ERR_get_error" :unsigned-fullword)))
-
-    (#_free errmsg-buffer)
-    (make-condition 'socket-error
-      :stream stream
-      :code errno
-      :identifier :unknown
-      :situation where
-      :format-control "~a (error #~d) during ~a"
-      :format-arguments
-        (list
-          (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
-          errno where))))
-
 (defclass async-ssl-socket ()
-  ((device :reader async-socket-device)
-   (remote-address :initarg :remote-address :reader async-socket-remote-address)
-   (request-queue :initform (make-queue) :reader async-socket-request-queue)
-   (buffer :initform nil :accessor async-socket-buffer)
-   (proactor :initform nil :accessor async-socket-proactor)
-   (timer :initform nil :accessor async-socket-timer)
-   (connect-timeout :initarg :connect-timeout :initform nil :reader async-socket-connect-timeout)
-   (input-timeout :initarg :input-timeout :initform nil :reader async-socket-input-timeout)
-   (output-timeout :initarg :output-timeout :initform nil :reader async-socket-output-timeout)
-   (ssl :initarg :ssl :initform nil :accessor async-socket-ssl)
-   (ssl-context :initarg :ssl-context :initform nil :accessor async-socket-ssl-context)))
+  (device
+   (remote-address :initarg :remote-address)
+   (request-queue :initform (make-queue))
+   (buffer :initform nil :accessor async-ssl-socket-buffer)
+   (proactor :initform nil)
+   (timer :initform nil)
+   (connect-timeout :initarg :connect-timeout :initform nil)
+   (input-timeout :initarg :input-timeout :initform nil)
+   (output-timeout :initarg :output-timeout :initform nil)
+   (ssl :initarg :ssl :initform nil)
+   (ssl-context :initarg :ssl-context :initform nil)))
 
 (defmethod initialize-instance :after ((socket async-ssl-socket) &rest initargs)
   (declare (ignore initargs))
@@ -60,13 +29,20 @@
         (external-call "SSLv23_client_method" :address) :address))
     (setq ssl (external-call "SSL_new" :address ssl-context :address))))
 
+(defmethod async-socket-device ((socket async-ssl-socket))
+  (slot-value socket 'device))
+
+(defmethod async-socket-set-proactor ((socket async-ssl-socket) proactor)
+  (setf (slot-value socket 'proactor) proactor))
+
 (defmethod close ((socket async-ssl-socket) &key abort)
   (declare (ignore abort))
   (with-slots (ssl ssl-context device proactor) socket
     (remove-device proactor device)
+    (external-call "SSL_shutdown" :address ssl)
     (external-call "SSL_free" :address ssl)
-    (external-call "SSL_CTX_free" :address ssl-context)
     (#_close device)
+    (external-call "SSL_CTX_free" :address ssl-context)
     (remove-timeout-handler socket)
     (setq device nil)))
 
@@ -166,18 +142,18 @@
         (setq value
           (external-call "SSL_do_handshake" :address ssl :int))
 
-        (if (/= value 1)
+        (when (/= value 1)
           (let ((errno (external-call "SSL_get_error" :address ssl :int value :int)))
-            (case errno
-              (+ssl-error-want-write+
+            (cond
+              ((= errno +ssl-error-want-write+)
                 (register-events proactor socket (logior EPOLLOUT EPOLLRDHUP)))
-              (+ssl-error-want-read+
+              ((= errno +ssl-error-want-read+)
                 (register-events proactor socket (logior EPOLLIN EPOLLRDHUP)))
-              (otherwise
+              (t
                 (remove-timeout-handler socket)
                 (funcall errback (make-ssl-error device "HANDSHAKE" errno))
-                (finish-socket-request socket)))
-            (return-from handshake)))
+                (finish-socket-request socket))))
+          (return-from handshake))
 
         ;; finished an operation
         (remove-timeout-handler socket)
@@ -242,11 +218,11 @@
     (let ((request (queue-peek request-queue)))
       (with-slots (data data-size buffer-size type state condition callback errback) request
 
-        (when (and (eq state :new) (> (length (async-socket-buffer socket)) 0))
-          (setf data (async-socket-buffer socket))
+        (when (and (eq state :new) (> (length (async-ssl-socket-buffer socket)) 0))
+          (setf data (async-ssl-socket-buffer socket))
           (let ((position (funcall condition data)))
             (when position
-              (setf (async-socket-buffer socket) (subseq data position))
+              (setf (async-ssl-socket-buffer socket) (subseq data position))
               (remove-timeout-handler socket)
               (funcall callback (subseq data 0 position))
               (finish-socket-request socket)
@@ -270,7 +246,7 @@
 
             (if (< nread 0)
               (let ((errno (external-call "SSL_get_error" :address ssl :int nread :int)))
-                (when (/= errno (- #$EAGAIN))
+                (when (/= errno +ssl-error-want-read+)
                   (remove-timeout-handler socket)
                   (funcall errback (make-ssl-error device "ASYNC-READ" errno))
                   (finish-socket-request socket))
@@ -282,11 +258,11 @@
                 (let ((position (funcall condition data)))
                   (cond
                     ((eq nread 0)
-                      (setf (async-socket-buffer socket) nil)
+                      (setf (async-ssl-socket-buffer socket) nil)
                       (remove-timeout-handler socket)
                       (funcall callback data))
                     (position
-                      (setf (async-socket-buffer socket) (subseq data position))
+                      (setf (async-ssl-socket-buffer socket) (subseq data position))
                       (remove-timeout-handler socket)
                       (funcall callback (subseq data 0 position)))
                     (t
