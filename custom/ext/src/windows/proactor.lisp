@@ -77,7 +77,7 @@
       (#_CreateIoCompletionPort handle completion-port
         (%ptr-to-int (async-socket-completion-key socket)) 0)
       (setf (gethash handle device-table) socket)
-      (setf (async-socket-proactor socket) proactor))))
+      (async-socket-set-proactor socket proactor))))
 
 (defmethod remove-device ((proactor device-proactor) device)
   (with-slots (device-table) proactor

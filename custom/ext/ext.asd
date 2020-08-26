@@ -71,6 +71,6 @@
                  (:module "windows"
                   :components
                   ((:file "utils")
+                   (:file "proactor")
                    (:file "async-socket")
-                   (:file "proactor"))))))
-)
+                   (:file "async-ssl")))))))

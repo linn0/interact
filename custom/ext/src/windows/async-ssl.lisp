@@ -3,15 +3,15 @@
 
 (defclass async-ssl-socket ()
   (device
-   (completion-key :reader async-socket-completion-key)
+   completion-key
    (remote-address :initarg :remote-address)
    (in-overlapped :initform (make-record :overlapped-extended))
    (out-overlapped :initform (make-record :overlapped-extended))
    (in-data :initform nil)
    (out-data :initform nil)
 
-   (proactor :initform nil :accessor async-socket-proactor)
-   (timer :initform nil :accessor async-socket-timer)
+   (proactor :initform nil)
+   (timer :initform nil)
    (connect-timeout :initarg :connect-timeout :initform nil)
    (input-timeout :initarg :input-timeout :initform nil)
    (output-timeout :initarg :output-timeout :initform nil)
@@ -57,7 +57,7 @@
 
     (setq read-bio (external-call "BIO_new" :address (external-call "BIO_s_mem" :address) :address))
     (setq write-bio (external-call "BIO_new" :address (external-call "BIO_s_mem" :address) :address))
-    (external-call "SSL_set_bio" ssl read-bio write-bio)))
+    (external-call "SSL_set_bio" :address ssl :address read-bio :address write-bio)))
 
 (defmethod async-socket-device ((socket async-ssl-socket))
   (slot-value socket 'device))
@@ -145,7 +145,8 @@
       (funcall callback))))
 
 (defmethod handle-read ((socket async-ssl-socket) bytes-transferred)
-  (with-slots (device in-buff in-buff-size in-data state condition ssl read-bio) socket
+  (with-slots (device state in-buff in-buff-size in-data condition
+               callback errback ssl read-bio) socket
     ; remember to free the overlapped io buffer
     (let ((nwriten (external-call "BIO_write"
                                   :address read-bio :address in-buff
@@ -183,7 +184,8 @@
 
 (defmethod handle-overlapped-entry ((socket async-ssl-socket) overlapped-entry)
   (let ((overlapped (pref overlapped-entry :overlapped-entry.overlapped)))
-    (with-slots (device errback state in-overlapped out-overlapped writing reading) socket
+    (with-slots (device callback errback state out-data
+                 in-overlapped out-overlapped writing reading) socket
       (remove-timeout-handler socket)
       ;; check whether operation completed, if then call the callback
       (rletz ((bytes-transferred #>DWORD))
@@ -209,19 +211,20 @@
             (socket-receive socket)))))))
 
 (defmethod socket-send ((socket async-ssl-socket))
-  (with-slots (device out-data out-buff out-buff-size writing
+  (with-slots (device errback out-data out-buff out-buff-size writing
                out-overlapped output-timeout ssl write-bio) socket
     (if writing
       (return-from socket-send))
 
     (when (> (length out-data) 0)
-      (let ((data-size (min out-buff-size (length out-data))))
+      (let ((data-size (min out-buff-size (length out-data)))
+            nwriten)
         (dotimes (index data-size)
-          (setf (paref out-buff (:array :unsigned-byte) index) (aref data index))))
-      (let ((nwriten (external-call "SSL_write"
-                                    :address ssl :address out-buff
-                                    :signed-fullword data-size
-                                    :signed-fullword)))
+          (setf (paref out-buff (:array :unsigned-byte) index) (aref out-data index)))
+        (setq nwriten (external-call "SSL_write"
+                                      :address ssl :address out-buff
+                                      :signed-fullword data-size
+                                      :signed-fullword))
         (if (/= nwriten data-size)
           (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
             (remove-timeout-handler socket)
@@ -258,7 +261,7 @@
 
 ; send a vector of binary data
 (defmethod async-write ((socket async-ssl-socket) data)
-  (with-slots (state callback errback) socket
+  (with-slots (state out-data callback errback) socket
     (assert (not state))
     (prog1 (create-promise
              (lambda (resolver rejecter)
@@ -295,6 +298,7 @@
 
 ; receive a vector of binary data
 (defmethod async-receive ((socket async-ssl-socket) type size cnd)
+  (declare (ignore type size))
   (with-slots (state condition callback errback in-data) socket
     (let ((position (funcall condition in-data)))
       (assert (not state))
