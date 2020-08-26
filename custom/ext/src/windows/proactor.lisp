@@ -1,6 +1,42 @@
 
 (in-package #:ext)
 
+(defgeneric async-socket-device (socket)
+  (:documentation "return socket device file descriptor."))
+
+(defgeneric async-socket-completion-key (socket)
+  (:documentation "return socket IO completion key."))
+
+(defgeneric async-socket-set-proactor (socket proactor)
+  (:documentation "set a socket's proactor."))
+
+(defgeneric async-connect (socket)
+  (:documentation "async connect a socket."))
+
+(defgeneric socket-send (socket)
+  (:documentation "async send data to a socket."))
+
+(defgeneric socket-receive (socket)
+  (:documentation "async receive data from a socket."))
+
+(defgeneric async-write (socket data)
+  (:documentation "async write data to a socket."))
+
+(defgeneric async-receive (socket type size condition)
+  (:documentation "async receive data from a socket."))
+
+(defgeneric async-read (socket size)
+  (:documentation "async read data from a socket."))
+
+(defgeneric async-read-until (socket condition)
+  (:documentation "async read data until condition  satisfied from a socket."))
+
+(defgeneric async-read-some (socket &optional size)
+  (:documentation "async read some data from a socket."))
+
+(defgeneric handle-overlapped-entry (socket overlapped-entry)
+  (:documentation "handle IO events on a socket."))
+
 (defclass device-proactor ()
   ((completion-port :reader device-proactor-completion-port)
    (device-table :initform nil)
@@ -35,13 +71,13 @@
       device-table)
     (#_CloseHandle completion-port)))
 
-(defmethod register ((proactor device-proactor) (socket async-socket))
+(defmethod register ((proactor device-proactor) socket)
   (with-slots (completion-port device-table) proactor
-    (with-slots (device completion-key) socket
-      (let ((handle (%int-to-ptr device)))
-        (#_CreateIoCompletionPort handle completion-port (%ptr-to-int completion-key) 0)
-        (setf (gethash handle device-table) socket)
-        (setf (async-socket-proactor socket) proactor)))))
+    (let ((handle (%int-to-ptr (async-socket-device socket))))
+      (#_CreateIoCompletionPort handle completion-port
+        (%ptr-to-int (async-socket-completion-key socket)) 0)
+      (setf (gethash handle device-table) socket)
+      (setf (async-socket-proactor socket) proactor))))
 
 (defmethod remove-device ((proactor device-proactor) device)
   (with-slots (device-table) proactor
@@ -78,12 +114,12 @@
               (windows-socket-error completion-port "GetQueuedCompletionStatusEx" errno)))))
       (dotimes (i (pref entries-removed #>ULONG))
         (let ((overlapped-entry (paref overlapped-entries :overlapped-entry i)))
-          (handle-overlapped-entry 
-            (gethash 
-              (pref 
-                (pref overlapped-entry :overlapped-entry.completion-key) 
-                :overlapped-io-completion-key.device) 
-              device-table) 
+          (handle-overlapped-entry
+            (gethash
+              (pref
+                (pref overlapped-entry :overlapped-entry.completion-key)
+                :overlapped-io-completion-key.device)
+              device-table)
             overlapped-entry))))))
 
 (defmethod loop-events ((proactor device-proactor))

@@ -13,17 +13,17 @@
    (errback :initarg :errback :initform nil :accessor overlapped-request-errback)))
 
 (defclass async-socket ()
-  ((device :reader async-socket-device)
-   (completion-key :reader async-socket-completion-key)
-   (remote-address :initarg :remote-address :reader async-socket-remote-address)
+  (device
+   completion-key
+   (remote-address :initarg :remote-address)
    (request-queue :initform (make-queue) :reader async-socket-request-queue)
    (overlapped-record :initform (make-record :overlapped-extended))
    (buffer :initform nil :accessor async-socket-buffer)
-   (proactor :initform nil :accessor async-socket-proactor)
+   (proactor :initform nil)
    (timer :initform nil :accessor async-socket-timer)
-   (connect-timeout :initarg :connect-timeout :initform nil :reader async-socket-connect-timeout)
-   (input-timeout :initarg :input-timeout :initform nil :reader async-socket-input-timeout)
-   (output-timeout :initarg :output-timeout :initform nil :reader async-socket-output-timeout)))
+   (connect-timeout :initarg :connect-timeout :initform nil)
+   (input-timeout :initarg :input-timeout :initform nil)
+   (output-timeout :initarg :output-timeout :initform nil)))
 
 (defmethod initialize-instance :after ((socket async-socket) &rest initargs)
   (declare (ignore initargs))
@@ -35,6 +35,15 @@
     (setq device (#_WSASocketA #$AF_INET #$SOCK_STREAM #$IPPROTO_TCP +null-ptr+ 0 #$WSA_FLAG_OVERLAPPED))
     (setq completion-key (make-record :overlapped-io-completion-key :device (%int-to-ptr device)))
     (setq timer (make-timer (lambda () (cancel-async-io socket))))))
+
+(defmethod async-socket-device ((socket async-socket))
+  (slot-value socket 'device))
+
+(defmethod async-socket-completion-key ((socket async-socket))
+  (slot-value socket 'completion-key))
+
+(defmethod async-socket-set-proactor ((socket async-socket) proactor)
+  (setf (slot-value socket 'proactor) proactor))
 
 (defmethod cancel-async-io ((socket async-socket))
   (with-slots (device request-queue overlapped-record) socket
@@ -137,17 +146,17 @@
                             (setf (async-socket-buffer socket) (subseq data position))
                             (funcall callback (subseq data 0 position)))
                           (t
-                            (recv-data socket)
+                            (socket-receive socket)
                             (return-from handle-overlapped-entry))))))))))
           ;; finished an operation
           (finish-overlapped-request request-queue)))
       (let ((request (queue-peek request-queue)))
         (when (and request (eq (overlapped-request-state request) :new))
           (ecase (overlapped-request-type request)
-            (:write (send-data socket))
-            ((:read-some :read-until :read) (recv-data socket))))))))
+            (:write (socket-send socket))
+            ((:read-some :read-until :read) (socket-receive socket))))))))
 
-(defmethod send-data ((socket async-socket))
+(defmethod socket-send ((socket async-socket))
   (with-slots (device request-queue overlapped-record output-timeout) socket
     ; remember to free the overlapped io buffer
     (let ((request (queue-peek request-queue)))
@@ -181,14 +190,14 @@
                         (overlapped-request-errback request) rejecter)
                   (queue-push request-queue request)))))
           (eq (queue-peek request-queue) request))
-            (send-data socket))
+            (socket-send socket))
       promise)))
 
 ; send a vector of binary data
 (defmethod async-write ((socket async-socket) data)
   (async-write-array socket (make-carray-from-vector data) (length data)))
 
-(defmethod recv-data ((socket async-socket))
+(defmethod socket-receive ((socket async-socket))
   (with-slots (device request-queue overlapped-record input-timeout) socket
     ; remember to free the overlapped io buffer
     (let ((request (queue-peek request-queue)))
@@ -200,7 +209,7 @@
               (setf (async-socket-buffer socket) (subseq data position))
               (funcall callback (subseq data 0 position))
               (finish-overlapped-request request-queue)
-              (return-from recv-data))))
+              (return-from socket-receive))))
         (setf state :running)
         (#_memset overlapped-record 0 (ccl::foreign-size :overlapped-extended :bytes))
         (let (size)
@@ -247,7 +256,7 @@
                         (overlapped-request-errback request) rejecter)
                   (queue-push request-queue request)))))
           (eq (queue-peek request-queue) request))
-        (recv-data socket))
+        (socket-receive socket))
       promise)))
 
 ; receive a vector of binary data
