@@ -1,8 +1,6 @@
 
 (in-package #:ext)
 
-(defconstant +default-read-buffer-size+ 4096)
-
 (defclass overlapped-request ()
   ((type :initarg :type :initform nil :reader overlapped-request-type)
    (state :initarg :state :initform :new :accessor overlapped-request-state)
@@ -13,20 +11,6 @@
    (condition :initarg :condition :initform nil :accessor overlapped-request-condition)
    (callback :initarg :callback :initform nil :accessor overlapped-request-callback)
    (errback :initarg :errback :initform nil :accessor overlapped-request-errback)))
-
-(defun c_get_connect_ex_func (socket)
-  (rletz ((connect-function :address)
-          (wsaid-connectex :windows-guid :data1 #x25a207b9 :data2 #xddf3 :data3 #x4660)
-          (bytes-returned #>DWORD))
-    (let ((high-bytes #(#x8e #xe9 #x76 #xe5 #x8c #x74 #x06 #x3e)))
-      (dotimes (index (length high-bytes))
-        (setf (paref (pref wsaid-connectex :windows-guid.data4) (:array #>BYTE 8) index) 
-          (svref high-bytes index))))
-    (#_WSAIoctl socket #$SIO_GET_EXTENSION_FUNCTION_POINTER 
-                wsaid-connectex (ccl::foreign-size :windows-guid :bytes)
-                connect-function (ccl::foreign-size :address :bytes) 
-                bytes-returned +null-ptr+ +null-ptr+)
-    (pref connect-function :address)))
 
 (defclass async-socket ()
   ((device :reader async-socket-device)

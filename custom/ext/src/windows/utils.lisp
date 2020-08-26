@@ -1,6 +1,11 @@
 
 (in-package #:ext)
 
+(defvar *foreign-libraries* nil)
+
+(defconstant +default-read-buffer-size+ 4096)
+(defconstant +default-write-buffer-size+ 4096)
+
 (def-foreign-type windows-guid
   (:struct :windows-guid
      (:data1 #>DWORD)
@@ -85,3 +90,45 @@ conditions, based on the state of the arguments."
   (if (< res 0)
     (windows-socket-error stream where res)
     res))
+
+(defun make-ssl-error (stream where errno)
+  (setq errno (abs errno))
+  (let* ((errmsg-buffer-size 1024)
+         (errmsg-buffer (#_malloc errmsg-buffer-size))
+         errmsg)
+    (do () ((eq errno 0))
+      (external-call "ERR_error_string_n" :signed-fullword errno
+                                          :address errmsg-buffer
+                                          :signed-fullword errmsg-buffer-size)
+      (setf errmsg (concatenate '(vector (unsigned-byte 8)) errmsg
+        (make-vector-from-carray errmsg-buffer (#_strlen errmsg-buffer))))
+      (setq errno (external-call "ERR_get_error" :unsigned-fullword)))
+
+    (#_free errmsg-buffer)
+    (format t "~a (error #~d) during ~a~%"
+      (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
+      errno where)
+    (make-condition 'socket-error
+      :stream stream
+      :code errno
+      :identifier :unknown
+      :situation where
+      :format-control "~a (error #~d) during ~a"
+      :format-arguments
+        (list
+          (ccl:decode-string-from-octets errmsg :external-format :us-ascii)
+          errno where))))
+
+(defun c_get_connect_ex_func (socket)
+  (rletz ((connect-function :address)
+          (wsaid-connectex :windows-guid :data1 #x25a207b9 :data2 #xddf3 :data3 #x4660)
+          (bytes-returned #>DWORD))
+    (let ((high-bytes #(#x8e #xe9 #x76 #xe5 #x8c #x74 #x06 #x3e)))
+      (dotimes (index (length high-bytes))
+        (setf (paref (pref wsaid-connectex :windows-guid.data4) (:array #>BYTE 8) index)
+          (svref high-bytes index))))
+    (#_WSAIoctl socket #$SIO_GET_EXTENSION_FUNCTION_POINTER
+                wsaid-connectex (ccl::foreign-size :windows-guid :bytes)
+                connect-function (ccl::foreign-size :address :bytes)
+                bytes-returned +null-ptr+ +null-ptr+)
+    (pref connect-function :address)))
