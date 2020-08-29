@@ -155,15 +155,24 @@
 
 (defun http-make-stream (req)
   "Open a asynchronous TCP stream to a given URL."
-  (let* ((url (req-url req))
-         (timeout (req-timeout req))
-         (stream (ext:make-async-socket 
-                 :remote-host (url-domain url)
-                 :remote-port (url-port url)
-                 :connect-timeout timeout
-                 :input-timeout timeout
-                 :output-timeout timeout
-                 :keepalive (req-keep-alive req))))
+  (let ((url (req-url req))
+        (timeout (req-timeout req))
+        stream)
+    (if (equal (url-scheme url) "https")
+      (setq stream (ext:make-async-ssl-socket
+                     :remote-host (url-domain url)
+                     :remote-port (url-port url)
+                     :connect-timeout timeout
+                     :input-timeout timeout
+                     :output-timeout timeout
+                     :keepalive (req-keep-alive req)))
+      (setq stream (ext:make-async-socket
+                     :remote-host (url-domain url)
+                     :remote-port (url-port url)
+                     :connect-timeout timeout
+                     :input-timeout timeout
+                     :output-timeout timeout
+                     :keepalive (req-keep-alive req))))
     (ext:register (req-reactor req) stream)
     (ext:attach 
       (ext:async-connect stream)
