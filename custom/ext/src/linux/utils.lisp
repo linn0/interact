@@ -90,14 +90,15 @@ conditions, based on the state of the arguments."
   (setq errno (abs errno))
   (let* ((errmsg-buffer-size 1024)
          (errmsg-buffer (#_malloc errmsg-buffer-size))
+         (errcode errno)
          errmsg)
-    (do () ((eq errno 0))
-      (external-call "ERR_error_string_n" :signed-fullword errno
+    (do () ((eq errcode 0))
+      (external-call "ERR_error_string_n" :signed-fullword errcode
                                           :address errmsg-buffer
                                           :signed-fullword errmsg-buffer-size)
       (setf errmsg (concatenate '(vector (unsigned-byte 8)) errmsg
         (make-vector-from-carray errmsg-buffer (#_strlen errmsg-buffer))))
-      (setq errno (external-call "ERR_get_error" :unsigned-fullword)))
+      (setq errcode (external-call "ERR_get_error" :unsigned-fullword)))
 
     (#_free errmsg-buffer)
     (format t "~a (error #~d) during ~a~%"

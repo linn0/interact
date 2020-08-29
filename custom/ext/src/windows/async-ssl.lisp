@@ -37,6 +37,7 @@
   (with-slots (device completion-key remote-address timer
                out-buff in-buff out-buff-size in-buff-size
                ssl ssl-context read-bio write-bio) socket
+    (format t "async ssl socket start to initialize~%")
     (unless remote-address
       (error 'simple-error
              :format-control "~a"
@@ -52,12 +53,11 @@
 
     (setq ssl-context
       (external-call "SSL_CTX_new" :address
-        (external-call "SSLv23_client_method" :address) :address))
+        (external-call "TLS_client_method" :address) :address))
     (setq ssl (external-call "SSL_new" :address ssl-context :address))
 
     (setq read-bio (external-call "BIO_new" :address (external-call "BIO_s_mem" :address) :address))
-    (setq write-bio (external-call "BIO_new" :address (external-call "BIO_s_mem" :address) :address))
-    (external-call "SSL_set_bio" :address ssl :address read-bio :address write-bio)))
+    (setq write-bio (external-call "BIO_new" :address (external-call "BIO_s_mem" :address) :address))))
 
 (defmethod async-socket-device ((socket async-ssl-socket))
   (slot-value socket 'device))
@@ -101,6 +101,7 @@
                        callback resolver
                        errback rejecter)))
         (set-timeout-handler socket connect-timeout)
+        (format t "async ssl socket start to connect~%")
         ; actually, SOCKET can pass as it is, but without a related type designator
         (if (eq 0 (%ff-call func-ptr
                             :address (%int-to-ptr device)
@@ -115,10 +116,14 @@
 
 (defmethod close ((socket async-ssl-socket) &key abort)
   (declare (ignore abort))
-  (with-slots (device completion-key proactor
+  (with-slots (device completion-key proactor ssl ssl-context
                out-overlapped in-overlapped out-buff in-buff) socket
     (remove-device proactor device)
+    (external-call "SSL_shutdown" :address ssl)
+    (external-call "SSL_free" :address ssl)
     (#_closesocket device)
+    (external-call "SSL_CTX_free" :address ssl-context)
+    (format t "async ssl socket closed~%")
     (free completion-key)
     (free out-overlapped)
     (free in-overlapped)
@@ -131,32 +136,53 @@
     (#_free in-buff)))
 
 (defmethod handle-connect ((socket async-ssl-socket))
-  (with-slots (device state ssl callback errback) socket
+  (with-slots (device state ssl callback errback read-bio write-bio) socket
     ; remember to free the overlapped io buffer
-    (let ((value (external-call "SSL_set_fd" :address ssl :int device :int)))
+    (let (value)
+      (setq value
+        (external-call "SSL_set_fd" :address ssl :int device :int))
+
       (when (/= value 1)
         (remove-timeout-handler socket)
-        (funcall errback (make-ssl-error device "ASYNC-CONNECT" value))
+        (funcall errback (make-ssl-error device "SSL_set_fd" value))
         (return-from handle-connect))
 
       ;; finished an operation
+      (external-call "SSL_set_bio" :address ssl :address read-bio :address write-bio)
       (external-call "SSL_set_connect_state" :address ssl)
+
+      (setq value
+        (external-call "SSL_do_handshake" :address ssl :int))
+
+      (when (/= value 1)
+        (let ((errno (external-call "SSL_get_error" :address ssl :int value :int)))
+          (when (not
+                  (member errno
+                    (list +ssl-error-want-write+ +ssl-error-want-read+)))
+            (remove-timeout-handler socket)
+            (funcall errback (make-ssl-error device "SSL_do_handshake" errno)))))
+
       (setf state nil)
+      (format t "async ssl socket connect succeed~%")
       (funcall callback))))
 
 (defmethod handle-read ((socket async-ssl-socket) bytes-transferred)
   (with-slots (device state in-buff in-buff-size in-data condition
-               callback errback ssl read-bio) socket
-    ; remember to free the overlapped io buffer
-    (let ((nwriten (external-call "BIO_write"
-                                  :address read-bio :address in-buff
-                                  :signed-fullword bytes-transferred
-                                  :signed-fullword)))
-      (if (/= nwriten bytes-transferred)
-        (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
-          (remove-timeout-handler socket)
-          (funcall errback (make-ssl-error device "BIO_write" errno))
-          (return-from handle-read))))
+               callback errback ssl read-bio reading) socket
+    (if reading
+      (return-from handle-read))
+
+    (when (> bytes-transferred 0)
+      (format t "BIO_write ~D bytes~%" bytes-transferred)
+      (let ((nwriten (external-call "BIO_write"
+                                    :address read-bio :address in-buff
+                                    :signed-fullword bytes-transferred
+                                    :signed-fullword)))
+        (if (/= nwriten bytes-transferred)
+          (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
+            (remove-timeout-handler socket)
+            (funcall errback (make-ssl-error device "BIO_write" errno))
+            (return-from handle-read)))))
 
     (let ((nread (external-call "SSL_read"
                                 :address ssl :address in-buff
@@ -164,8 +190,11 @@
                                 :signed-fullword)))
       (if (<= nread 0)
         (let ((errno (external-call "SSL_get_error" :address ssl :int nread :int)))
-          (remove-timeout-handler socket)
-          (funcall errback (make-ssl-error device "BIO_write" errno))
+          (when (not
+                  (member errno
+                    (list +ssl-error-none+ +ssl-error-want-write+ +ssl-error-want-read+)))
+            (remove-timeout-handler socket)
+            (funcall errback (make-ssl-error device "SSL_read" errno)))
           (return-from handle-read)))
 
       (setf in-data (concatenate '(vector (unsigned-byte 8)) in-data
@@ -196,17 +225,23 @@
           (let ((bytes-transferred (pref bytes-transferred #>DWORD)))
             (cond
               ((eq state :connect)
+                (format t "async ssl socket connected ~D bytes~%" bytes-transferred)
                 (handle-connect socket))
-              ((eq overlapped (pref (pref in-overlapped :overlapped-extended.overlapped) :address))
+              ((eq (%ptr-to-int overlapped)
+                   (%ptr-to-int (pref in-overlapped :overlapped-extended.overlapped)))
                 (setf reading nil)
-                (handle-read socket bytes-transferred))
-              ((eq overlapped (pref (pref out-overlapped :overlapped-extended.overlapped) :address))
+                (format t "async ssl socket received ~D bytes~%" bytes-transferred))
+              ((eq (%ptr-to-int overlapped)
+                   (%ptr-to-int (pref out-overlapped :overlapped-extended.overlapped)))
                 (setf writing nil)
+                (format t "async ssl socket sent ~D bytes~%" bytes-transferred)
                 (when (eq (length out-data) 0)
                   (setf state nil)
-                  (funcall callback bytes-transferred)))
+                  (funcall callback bytes-transferred))
+                (setq bytes-transferred 0))
               (t (error "invalid overlapped entry")))
 
+            (handle-read socket bytes-transferred)
             (socket-send socket)
             (socket-receive socket)))))))
 
@@ -227,13 +262,13 @@
                                       :signed-fullword))
         (if (/= nwriten data-size)
           (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
-            (remove-timeout-handler socket)
-            (funcall errback (make-ssl-error device "SSL_write" errno))
-            (return-from socket-send)))
-
-        (if (eq data-size (length out-data))
-          (setf out-data nil)
-          (setf out-data (subseq out-data data-size)))))
+            (format t "want write bytes: ~D, errno: ~D~%" data-size errno)
+            (when (not
+                    (member errno
+                      (list +ssl-error-none+ +ssl-error-want-write+ +ssl-error-want-read+)))
+              (remove-timeout-handler socket)
+              (funcall errback (make-ssl-error device "SSL_write" errno))))
+          (setf out-data (subseq out-data nwriten)))))
 
     (when (> (external-call "BIO_ctrl_pending" :address write-bio :size_t) 0)
       (let ((nread (external-call "BIO_read"
@@ -242,8 +277,11 @@
                                   :signed-fullword)))
         (if (<= nread 0)
           (let ((errno (external-call "SSL_get_error" :address ssl :int nread :int)))
-            (remove-timeout-handler socket)
-            (funcall errback (make-ssl-error device "BIO_read" errno))
+            (when (not
+                    (member errno
+                      (list +ssl-error-none+ +ssl-error-want-write+ +ssl-error-want-read+)))
+              (remove-timeout-handler socket)
+              (funcall errback (make-ssl-error device "BIO_read" errno)))
             (return-from socket-send)))
 
         (#_memset out-overlapped 0 (ccl::foreign-size :overlapped-extended :bytes))
@@ -335,15 +373,14 @@
                       proactor)
   "Create and return a new async socket."
   (declare (ignore keepalive))
+  (format t "make async ssl socket~%")
   (unless *foreign-libraries*
     (nconc *foreign-libraries*
       (mapcar (lambda (lib) (open-shared-library lib))
         '("C:/Program Files/OpenSSL-Win64/libcrypto-1_1-x64.dll"
           "C:/Program Files/OpenSSL-Win64/libssl-1_1-x64.dll")))
 
-    (external-call "SSL_library_init")
-    (external-call "SSL_load_error_strings")
-    (external-call "ERR_load_BIO_strings"))
+    (external-call "OPENSSL_init_ssl" :unsigned-doubleword #x00200002 :address +null-ptr+ :int))
 
   (let ((socket (make-instance 'async-ssl-socket :remote-address
                   (resolve-address :address-family address-family
