@@ -9,9 +9,9 @@
 
 (mapc (lambda (dir) (push (namestring dir) asdf:*central-registry*))
   (uiop:subdirectories +app-home+))
+
 (mapc (lambda (system) (asdf:load-system system))
-  '("simple-date" "cl-postgres" "s-sql" "postmodern"
-    "plump-dom" "plump-lexer" "plump-parser" "plump" "clss" "salza2" "http" "datapump"))
+  '("datapump"))
 
 (defun cleanup ()
   (log:debug "datapump application exitting")
