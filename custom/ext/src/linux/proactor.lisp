@@ -140,3 +140,35 @@
 
 (defun make-device-proactor ()
   (make-instance 'device-proactor))
+
+(defun make-async-socket (&key
+                          (address-family :internet)
+                          (ssl nil)
+                          remote-host remote-port
+                          connect-timeout input-timeout output-timeout
+                          keepalive
+                          proactor)
+  "Create and return a new async socket."
+  (declare (ignore keepalive))
+
+  (when (and ssl (null *foreign-libraries*))
+    (nconc *foreign-libraries*
+      (mapcar (lambda (lib) (open-shared-library lib))
+        '("/lib64/libcrypto.so" "/lib64/libssl.so")))
+
+    (external-call "SSL_library_init")
+    (external-call "SSL_load_error_strings"))
+
+  (let ((socket (make-instance
+                  (if ssl
+                    (find-class 'async-ssl-socket)
+                    (find-class 'async-socket))
+                  :remote-address
+                    (resolve-address :address-family address-family
+                                     :host remote-host :port remote-port)
+                  :connect-timeout connect-timeout
+                  :input-timeout input-timeout
+                  :output-timeout output-timeout)))
+    (if proactor
+      (register proactor socket))
+    socket))

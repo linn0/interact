@@ -279,21 +279,3 @@
 ; receive a vector of binary data
 (defmethod async-read-until ((socket async-socket) condition)
   (async-receive socket :read-until nil condition))
-
-(defun make-async-socket (&key
-                      (address-family :internet)
-                      remote-host remote-port
-                      connect-timeout input-timeout output-timeout
-                      keepalive
-                      proactor)
-  "Create and return a new async socket."
-  (declare (ignore keepalive))
-  (let ((socket (make-instance 'async-socket :remote-address 
-                  (resolve-address :address-family address-family 
-                                   :host remote-host :port remote-port)
-                  :connect-timeout connect-timeout
-                  :input-timeout input-timeout
-                  :output-timeout output-timeout)))
-    (if proactor 
-      (register proactor socket))
-    socket))

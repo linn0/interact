@@ -19,6 +19,7 @@
    (state :initform nil)
    (writing :initform nil)
    (reading :initform nil)
+   (closing :initform nil)
    (condition :initform nil)
    (callback ::initform nil)
    (errback :initform nil)
@@ -34,7 +35,7 @@
 
 (defmethod initialize-instance :after ((socket async-ssl-socket) &rest initargs)
   (declare (ignore initargs))
-  (with-slots (device completion-key remote-address timer
+  (with-slots (device state completion-key remote-address timer
                out-buff in-buff out-buff-size in-buff-size
                ssl ssl-context read-bio write-bio) socket
     (format t "async ssl socket start to initialize~%")
@@ -44,7 +45,12 @@
              :format-arguments '("remote-address initarg nil")))
     (setq device (#_WSASocketA #$AF_INET #$SOCK_STREAM #$IPPROTO_TCP +null-ptr+ 0 #$WSA_FLAG_OVERLAPPED))
     (setq completion-key (make-record :overlapped-io-completion-key :device (%int-to-ptr device)))
-    (setq timer (make-timer (lambda () (cancel-async-io socket))))
+    (setq timer
+      (make-timer
+        (lambda ()
+          (format t "~s ~d timeout during ~a~%" socket device
+            (concatenate 'string "ASYNC-" (symbol-name state)))
+          (cancel-async-io socket))))
 
     (setq out-buff-size +default-write-buffer-size+)
     (setq in-buff-size +default-read-buffer-size+)
@@ -68,10 +74,15 @@
 (defmethod async-socket-set-proactor ((socket async-ssl-socket) proactor)
   (setf (slot-value socket 'proactor) proactor))
 
+(defmethod close ((socket async-ssl-socket) &key abort)
+  (declare (ignore abort))
+  (with-slots (closing reading) socket
+    (setf closing t)
+    (if reading
+      (cancel-async-io socket))))
+
 (defmethod cancel-async-io ((socket async-ssl-socket))
-  (with-slots (device type out-overlapped) socket
-    (format t "~s ~d timeout during ~a~%" socket device
-      (concatenate 'string "ASYNC-" (symbol-name type)))
+  (with-slots (device out-overlapped) socket
     (if (eq 0 (external-call "CancelIoEx"
                 :address (%int-to-ptr device)
                 :address out-overlapped
@@ -114,9 +125,8 @@
             (if (/= errno (- #$WSA_IO_PENDING))
               (windows-socket-error device "ConnectEx" errno))))))))
 
-(defmethod close ((socket async-ssl-socket) &key abort)
-  (declare (ignore abort))
-  (with-slots (device completion-key proactor ssl ssl-context
+(defmethod handle-close ((socket async-ssl-socket))
+  (with-slots (device state completion-key proactor ssl ssl-context
                out-overlapped in-overlapped out-buff in-buff) socket
     (remove-device proactor device)
     (external-call "SSL_shutdown" :address ssl)
@@ -133,7 +143,8 @@
           out-overlapped nil
           in-overlapped nil)
     (#_free out-buff)
-    (#_free in-buff)))
+    (#_free in-buff)
+    (setf state :closed)))
 
 (defmethod handle-connect ((socket async-ssl-socket))
   (with-slots (device state ssl callback errback read-bio write-bio) socket
@@ -212,11 +223,17 @@
               (funcall callback data))))))))
 
 (defmethod handle-overlapped-entry ((socket async-ssl-socket) overlapped-entry)
-  (let ((overlapped (pref overlapped-entry :overlapped-entry.overlapped)))
-    (with-slots (device callback errback state out-data
-                 in-overlapped out-overlapped writing reading) socket
-      (remove-timeout-handler socket)
-      ;; check whether operation completed, if then call the callback
+  (with-slots (device callback errback state out-data closing
+               in-overlapped out-overlapped writing reading) socket
+    (if (eq state :closed)
+      (return-from handle-overlapped-entry))
+    (when closing
+      (handle-close socket)
+      (return-from handle-overlapped-entry))
+
+    (remove-timeout-handler socket)
+    ;; check whether operation completed, if then call the callback
+    (let ((overlapped (pref overlapped-entry :overlapped-entry.overlapped)))
       (rletz ((bytes-transferred #>DWORD))
         (if (eq 0 (#_GetOverlappedResult (%int-to-ptr device) overlapped bytes-transferred 0))
           (let ((errno (ccl::%get-winsock-error))
@@ -364,30 +381,3 @@
 ; receive a vector of binary data
 (defmethod async-read-until ((socket async-ssl-socket) condition)
   (async-receive socket :read-until nil condition))
-
-(defun make-async-ssl-socket (&key
-                      (address-family :internet)
-                      remote-host remote-port
-                      connect-timeout input-timeout output-timeout
-                      keepalive
-                      proactor)
-  "Create and return a new async socket."
-  (declare (ignore keepalive))
-  (format t "make async ssl socket~%")
-  (unless *foreign-libraries*
-    (nconc *foreign-libraries*
-      (mapcar (lambda (lib) (open-shared-library lib))
-        '("C:/Program Files/OpenSSL-Win64/libcrypto-1_1-x64.dll"
-          "C:/Program Files/OpenSSL-Win64/libssl-1_1-x64.dll")))
-
-    (external-call "OPENSSL_init_ssl" :unsigned-doubleword #x00200002 :address +null-ptr+ :int))
-
-  (let ((socket (make-instance 'async-ssl-socket :remote-address
-                  (resolve-address :address-family address-family
-                                   :host remote-host :port remote-port)
-                  :connect-timeout connect-timeout
-                  :input-timeout input-timeout
-                  :output-timeout output-timeout)))
-    (if proactor
-      (register proactor socket))
-    socket))
