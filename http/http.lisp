@@ -272,6 +272,8 @@
         (http-async-read-response req stream data))
       (:then (resp)
         (setq response resp))
+      (:catch (condition)
+        (format t "Perform HTTP request failed: ~S~%" condition))
       (:finally ()
         (http-close-stream req response stream)))))
 

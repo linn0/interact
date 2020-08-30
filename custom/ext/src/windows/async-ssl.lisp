@@ -38,7 +38,6 @@
   (with-slots (device state completion-key remote-address timer
                out-buff in-buff out-buff-size in-buff-size
                ssl ssl-context read-bio write-bio) socket
-    (format t "async ssl socket start to initialize~%")
     (unless remote-address
       (error 'simple-error
              :format-control "~a"
@@ -112,7 +111,7 @@
                        callback resolver
                        errback rejecter)))
         (set-timeout-handler socket connect-timeout)
-        (format t "async ssl socket start to connect~%")
+
         ; actually, SOCKET can pass as it is, but without a related type designator
         (if (eq 0 (%ff-call func-ptr
                             :address (%int-to-ptr device)
@@ -133,7 +132,7 @@
     (external-call "SSL_free" :address ssl)
     (#_closesocket device)
     (external-call "SSL_CTX_free" :address ssl-context)
-    (format t "async ssl socket closed~%")
+
     (free completion-key)
     (free out-overlapped)
     (free in-overlapped)
@@ -174,7 +173,6 @@
             (funcall errback (make-ssl-error device "SSL_do_handshake" errno)))))
 
       (setf state nil)
-      (format t "async ssl socket connect succeed~%")
       (funcall callback))))
 
 (defmethod handle-read ((socket async-ssl-socket) bytes-transferred)
@@ -184,7 +182,6 @@
       (return-from handle-read))
 
     (when (> bytes-transferred 0)
-      (format t "BIO_write ~D bytes~%" bytes-transferred)
       (let ((nwriten (external-call "BIO_write"
                                     :address read-bio :address in-buff
                                     :signed-fullword bytes-transferred
@@ -242,16 +239,13 @@
           (let ((bytes-transferred (pref bytes-transferred #>DWORD)))
             (cond
               ((eq state :connect)
-                (format t "async ssl socket connected ~D bytes~%" bytes-transferred)
                 (handle-connect socket))
               ((eq (%ptr-to-int overlapped)
                    (%ptr-to-int (pref in-overlapped :overlapped-extended.overlapped)))
-                (setf reading nil)
-                (format t "async ssl socket received ~D bytes~%" bytes-transferred))
+                (setf reading nil))
               ((eq (%ptr-to-int overlapped)
                    (%ptr-to-int (pref out-overlapped :overlapped-extended.overlapped)))
                 (setf writing nil)
-                (format t "async ssl socket sent ~D bytes~%" bytes-transferred)
                 (when (eq (length out-data) 0)
                   (setf state nil)
                   (funcall callback bytes-transferred))
@@ -279,7 +273,6 @@
                                       :signed-fullword))
         (if (/= nwriten data-size)
           (let ((errno (external-call "SSL_get_error" :address ssl :int nwriten :int)))
-            (format t "want write bytes: ~D, errno: ~D~%" data-size errno)
             (when (not
                     (member errno
                       (list +ssl-error-none+ +ssl-error-want-write+ +ssl-error-want-read+)))
@@ -355,7 +348,7 @@
 (defmethod async-receive ((socket async-ssl-socket) type size cnd)
   (declare (ignore type size))
   (with-slots (state condition callback errback in-data) socket
-    (let ((position (funcall condition in-data)))
+    (let ((position (funcall cnd in-data)))
       (assert (not state))
       (if position
         (let ((data (subseq in-data 0 position)))

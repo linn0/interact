@@ -28,7 +28,6 @@
 (defmethod initialize-instance :after ((socket async-socket) &rest initargs)
   (declare (ignore initargs))
   (with-slots (device completion-key remote-address overlapped-record timer) socket
-    (format t "async socket start to initialize~%")
     (unless remote-address
       (error 'simple-error
              :format-control "~a"
@@ -83,7 +82,7 @@
                                   :callback resolver
                                   :errback rejecter))))
         (set-timeout-handler socket connect-timeout)
-        (format t "async socket start to connect~%")
+
         ; actually, SOCKET can pass as it is, but without a related type designator
         (if (eq 0 (%ff-call func-ptr
                             :address (%int-to-ptr device)
@@ -134,13 +133,10 @@
                     (bytes-transferred (pref bytes-transferred #>DWORD)))
                 (ecase request-type
                   (:connect
-                    (format t "async socket connect succeed~%")
                     (funcall callback))
                   (:write
-                    (format t "async socket sent ~D bytes~%" bytes-transferred)
                     (funcall callback bytes-transferred))
                   ((:read-some :read-until :read)
-                    (format t "async socket received ~D bytes~%" bytes-transferred)
                     (let ((buffer (overlapped-request-buffer request)))
                       (setf data (concatenate '(vector (unsigned-byte 8)) data 
                                    (make-vector-from-carray buffer bytes-transferred)))
