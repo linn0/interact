@@ -22,7 +22,6 @@
                  (:file "http-utils")
                  (:file "taskmgr")
                  (:file "searcher")
-                 (:file "player")
                  (:file "http-server"))))
   :depends-on (:cl-postgres :s-sql :postmodern
                :plump-dom :plump-lexer :plump-parser :plump

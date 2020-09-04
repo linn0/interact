@@ -7,7 +7,6 @@
 
 (http:define-http-router http-url-router
   (:get "/search"  'search-query)
-  (:get "/player"  'player)
   (:get "/taskmgr" 'task-manage))
 
 ;;; ----------------------------------------------------
