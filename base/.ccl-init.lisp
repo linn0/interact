@@ -9,6 +9,6 @@
   (uiop:subdirectories "home:app;interact;base"))
 
 (mapc (lambda (system) (asdf:load-system system))
-  '("ext" "cffi" "log4cl" "cl-ppcre"
+  '("ext" "cffi" "cl-ppcre"
     "simple-date" "cl-postgres" "s-sql" "postmodern"
     "plump-dom" "plump-lexer" "plump-parser" "plump" "clss" "salza2" "http"))

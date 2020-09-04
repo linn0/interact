@@ -14,12 +14,11 @@
   '("datapump"))
 
 (defun cleanup ()
-  (log:debug "datapump application exitting")
-  (log4cl:flush-all-appenders))
+  (log:debug "datapump application exitting"))
 
 (defun init ()
   (let ((log-path (ext:concat +app-home+ "datapump/logs/" "datapump-%Y%m%d.log")))
-    (log:config :debug :daily log-path)
+    (log:config t :debug)
     (log:debug "datapump application started, log path: ~A" log-path))
   (push #'cleanup ccl:*lisp-cleanup-functions*))
 

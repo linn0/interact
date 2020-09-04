@@ -34,6 +34,15 @@
   (let ((url (url:url-parse string)))
     (format nil "~a:~d" (url:url-domain url) (url:url-port url))))
 
+(defun http-parse-page-list (site-id url)
+  (ext:attach (http:http-async-get url *http-proactor*)
+    (lambda (response)
+      (let ((input (http:resp-body response)))
+        (ext:debug "html url: ~A, response size: ~D" url (length input))
+        (map 'vector #'plump:text
+          (clss:select "div.Box.mb-3 div.Box-row a"
+            (plump:parse input)))))))
+
 (defun http-client-start (&key site-id start end)
   (pgsql:with-connection +db-conn-info+
     (make-task 'http-parse-site (list site-id start end)

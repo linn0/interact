@@ -39,7 +39,8 @@
                  (:module "streams"
                   :components
                   ((:file "in-memory")
-                   (:file "stream")))
+                   (:file "stream")
+                   (:file "logging")))
                  (:file "features")
 
                  (:module "parallel"
