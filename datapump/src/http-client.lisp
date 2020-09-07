@@ -34,11 +34,11 @@
   (let ((url (url:url-parse string)))
     (format nil "~a:~d" (url:url-domain url) (url:url-port url))))
 
-(defun http-parse-page-list (site-id url)
+(defun http-parse-page-list (url)
   (ext:attach (http:http-async-get url *http-proactor*)
     (lambda (response)
       (let ((input (http:resp-body response)))
-        (ext:debug "html url: ~A, response size: ~D" url (length input))
+        (log:debug "html url: ~A, response size: ~D" url (length input))
         (map 'vector #'plump:text
           (clss:select "div.Box.mb-3 div.Box-row a"
             (plump:parse input)))))))
@@ -72,11 +72,11 @@
       (let ((input (http:resp-body response)))
         (log:debug "html url: ~A, response size: ~D" url (length input))
         (pgsql:with-connection +db-conn-info+
-          (ccl:dovector (elem (clss:select "ul#contents li h5 a" (plump:parse input)))
+          (ccl:dovector (elem (clss:select "div#readme h5 a" (plump:parse input)))
             (let* ((item-url (url-resolve url (plump:attribute elem "href")))
                    (url-path (url:url-path (url:url-parse item-url))))
               (unless (pgsql:query
-                        (:select 'id :from 'movie-item :where (:= 'url url-path))
+                        (:select 'id :from 'blog-item :where (:= 'url url-path))
                         :single)
                 (make-task 'html-parse-item (list site-id item-url)
                   (http-url-group item-url))))))))))
@@ -88,41 +88,31 @@
              (doc (plump:parse input))
              (url-path (url:url-path (url:url-parse item-url))))
         (log:debug "item url: ~A, response size: ~D" item-url (length input))
-        (let ((image-url (url-resolve item-url
-                           (plump:attribute (select-first "div.detail-pic > img" doc) "src")))
-              (title (plump:text (select-first "div.detail-title > h2" doc)))
-              (actors (map 'vector #'plump:text (clss:select "div.info > dl > dd > a" doc)))
-              (play-list (ext:join
-                           (map 'list (lambda (elem) (plump:attribute elem "href"))
-                             (clss:select "p.play-list a" doc))
-                           :separator ","))
-              (detail (plump:text (select-first "div#detail-intro div.detail-desc-cnt" doc)))
-              (rating (parse-integer (plump:text (select-first "strong#pingfen" doc))))
-              (addtime (parse-timestamp (plump:text (select-first "span#addtime" doc)))))
-          (let* ((relative-path (ext:join (list site-id
-                                  (subseq image-url (1+ (position #\/ image-url :from-end t))))
-                                  :separator "/"))
-                 (movie (make-instance 'movie-item :site-id site-id
-                                       :title title :actor actors :detail detail
-                                       :url url-path :image-url image-url :play-url play-list
-                                       :image relative-path :addtime addtime :rating rating)))
+        (let ((title (plump:text (select-first "div#readme > article > h2" doc)))
+              (author (plump:text
+                        (clss:select "div.Box-header.Details div.css-truncate > span.text-bold" doc)))
+              (content (plump:text (select-first "div#readme > article" doc)))
+              (addtime (parse-timestamp
+                         (plump:attribute
+                           (select-first "div.Box-header.Details relative-time" doc)
+                           "datetime"))))
+          (let* ((blog (make-instance 'blog-item :site-id site-id
+                                       :title title :author author :content content
+                                       :url url-path :addtime addtime :rating rating)))
             (pgsql:with-connection +db-conn-info+
-              (pgsql:save-dao movie)
-              (make-task 'http-parse-image
-                (list (movie-item-id movie))
-                (http-url-group (movie-image-url movie))))))))))
+              (pgsql:save-dao blog))))))))
 
 (defun http-parse-image (item-id)
-  (let* ((movie (pgsql:get-dao 'movie-item item-id))
-         (file-path (ext:concat +http-images-folder+ (movie-item-image movie)))
+  (let* ((blog (pgsql:get-dao 'blog-item item-id))
+         (file-path (ext:concat +http-images-folder+ (blog-item-image blog)))
          (tmp-file (ext:concat file-path ".tmp")))
     (unless (probe-file file-path)
       (ext:attach (http:http-async-get
-                    (http-url-encode (movie-image-url movie))
+                    (http-url-encode (blog-image-url blog))
                     *http-proactor* :keep-alive t)
         (lambda (response)
           (let ((input (http:resp-body response)))
-            (log:debug "image url: ~A, response size: ~D" (movie-image-url movie) (length input))
+            (log:debug "image url: ~A, response size: ~D" (blog-image-url blog) (length input))
             (with-open-file (ofile tmp-file
                                    :direction :output
                                    :element-type 'unsigned-byte
@@ -130,11 +120,11 @@
               (write-sequence input ofile))
             (rename-file tmp-file file-path)))))
     (make-task 'http-post-process
-      (list (movie-item-id movie)) "post-process-item")))
+      (list (blog-item-id blog)) "post-process-item")))
 
 (defun http-post-process (item-id)
-  (let* ((movie (pgsql:get-dao 'movie-item item-id))
-         (img-path (ext:concat "log/images/" (movie-item-image movie)))
+  (let* ((blog (pgsql:get-dao 'blog-item item-id))
+         (img-path (ext:concat "log/images/" (blog-item-image blog)))
          (suffix
            (string-downcase
              (subseq img-path
@@ -142,10 +132,10 @@
     (unless (member suffix '("png" "gif" "jpeg") :test #'string=)
       (setq suffix "jpeg"))
     (pgsql:query
-      (:insert-into 'movie-item-aux
+      (:insert-into 'blog-item-aux
         (:select
-          (movie-item-id movie)
-          (:as (:to_tsvector "chinese" (movie-item-title movie)) 'title)
+          (blog-item-id blog)
+          (:as (:to_tsvector "chinese" (blog-item-title blog)) 'title)
           (:as (:shuffle_pattern 'pattern) 'pattern)
           (:as (:pattern2signature 'pattern) 'signature)
           :from
